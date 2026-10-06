@@ -6,6 +6,7 @@
 @import "bootstrap-icons/font/bootstrap-icons.css";
 @import "admin-lte/dist/css/adminlte.min.css";
 @import "tom-select/dist/css/tom-select.bootstrap5.css";
+@import "./guru-traders-theme.css";
 
 /* Tom Select renders its own control; align it with Bootstrap form-select
    sizing so a searchable dropdown and a plain one line up in the same row. */
@@ -64,4 +65,14 @@
 #secondary-contacts-wrap .table-responsive,
 .grid-table-wrap {
     overflow: visible !important;
+}
+
+/* Safety net if a Tailwind pagination view ever leaks through: unconstrained
+   SVGs fill the content width and look like giant chevrons on list pages. */
+nav[role="navigation"] svg,
+.pagination svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    display: inline-block;
+    vertical-align: middle;
 }

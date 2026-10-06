@@ -61,6 +61,13 @@ abstract class ProductRequest extends FormRequest
             // Sheet: "barcode (needs to have text and number allowed)".
             'barcode'                 => ['nullable', 'string', 'max:60'],
 
+            // Small reference photo shown as a thumbnail on the Inquiry item
+            // table and BOM trims panel — "I need a small image against every
+            // line" (09-Sep call). Optional; existing photo is cleared via
+            // remove_image rather than requiring a fresh upload every save.
+            'image'                   => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'remove_image'            => ['nullable', 'boolean'],
+
             // Typed, not picked — the client cancelled the Unit Master.
             'unit_po'                 => ['nullable', 'string', 'max:20'],
             'unit_export'             => ['nullable', 'string', 'max:20'],
@@ -105,9 +112,13 @@ abstract class ProductRequest extends FormRequest
                 Rule::exists('calculation_bases', 'id'),
             ];
 
-            // Only RoSCTL is quoted as two percentages (sheet cols O and P).
-            $rules["incentives.{$scheme}.percent_2"] = in_array($scheme, ProductIncentive::TWO_PERCENT_SCHEMES, true)
+            // Only RoSCTL is quoted as two percentages and two caps.
+            $two = in_array($scheme, ProductIncentive::TWO_PERCENT_SCHEMES, true);
+            $rules["incentives.{$scheme}.percent_2"] = $two
                 ? ['nullable', 'numeric', 'min:0', 'max:100']
+                : ['prohibited'];
+            $rules["incentives.{$scheme}.cap_value_2"] = $two
+                ? ['nullable', 'numeric', 'min:0']
                 : ['prohibited'];
         }
 
@@ -135,6 +146,7 @@ abstract class ProductRequest extends FormRequest
             $attributes["incentives.{$scheme}.percent_1"]            = "{$label} %";
             $attributes["incentives.{$scheme}.percent_2"]            = "{$label} % 2";
             $attributes["incentives.{$scheme}.cap_value"]            = "{$label} cap value";
+            $attributes["incentives.{$scheme}.cap_value_2"]          = "{$label} cap value 2";
             $attributes["incentives.{$scheme}.calculation_basis_id"] = "{$label} calculated on";
         }
 

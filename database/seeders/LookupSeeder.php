@@ -8,7 +8,6 @@ use App\Models\Currency;
 use App\Models\GstRate;
 use App\Models\Incoterm;
 use App\Models\PaymentTerm;
-use App\Models\Port;
 use App\Models\PriceBand;
 use App\Models\ShipmentMethod;
 use Illuminate\Database\Seeder;
@@ -40,7 +39,8 @@ class LookupSeeder extends Seeder
     private function productLookups(): void
     {
         // Product sheet col J: "AA and AB with an option to add in the future".
-        foreach ([['AA', 'Band AA'], ['AB', 'Band AB']] as [$code, $name]) {
+        // N/A — client request: some products have no price band.
+        foreach ([['AA', 'Band AA'], ['AB', 'Band AB'], ['NA', 'N/A']] as [$code, $name]) {
             PriceBand::firstOrCreate(['code' => $code], ['name' => $name]);
         }
 
@@ -57,7 +57,7 @@ class LookupSeeder extends Seeder
          * supplier-side commission and FOB Value for a buyer-side one. Both
          * screens read the same table, so the list is the union.
          */
-        foreach (['FOB Value', 'Net Value', 'Quantity', 'Net Weight', 'Square Metre'] as $basis) {
+        foreach (['FOB Value', 'Net Value', 'Gross Value', 'Quantity', 'Net Weight', 'Square Metre'] as $basis) {
             CalculationBasis::firstOrCreate(['name' => $basis]);
         }
     }
@@ -67,24 +67,14 @@ class LookupSeeder extends Seeder
      */
     private function buyerLookups(): void
     {
-        // Col L. India plus the destinations on the client's own example rows.
-        $countries = [
-            ['IN', 'India',          '+91'],
-            ['GB', 'United Kingdom', '+44'],
-            ['US', 'United States',  '+1'],
-            ['AE', 'United Arab Emirates', '+971'],
-            ['DE', 'Germany',        '+49'],
-            ['FR', 'France',         '+33'],
-            ['IT', 'Italy',          '+39'],
-            ['ES', 'Spain',          '+34'],
-            ['NL', 'Netherlands',    '+31'],
-            ['AU', 'Australia',      '+61'],
-            ['CA', 'Canada',         '+1'],
-            ['JP', 'Japan',          '+81'],
-        ];
+        // Col L — full ISO country list (client: "please add all countries").
+        $countries = require __DIR__.'/data/iso_countries.php';
 
         foreach ($countries as [$iso, $name, $dial]) {
-            Country::firstOrCreate(['iso_code' => $iso], ['name' => $name, 'dial_code' => $dial]);
+            Country::firstOrCreate(
+                ['iso_code' => $iso],
+                ['name' => $name, 'dial_code' => $dial, 'status' => 'active']
+            );
         }
 
         // Col T. INR first — it is the PO currency; the rest are buyer-side.
@@ -103,32 +93,8 @@ class LookupSeeder extends Seeder
             Currency::firstOrCreate(['iso_code' => $iso], ['name' => $name, 'symbol' => $symbol]);
         }
 
-        // Col N. Indian load ports and the discharge ports on the example rows.
-        $ports = [
-            ['IN', 'INMAA', 'Chennai Port',      'sea'],
-            ['IN', 'INNSA', 'Nhava Sheva',       'sea'],
-            ['IN', 'INTUT', 'Tuticorin Port',    'sea'],
-            ['IN', 'INCOK', 'Cochin Port',       'sea'],
-            ['IN', 'INMAA4', 'Chennai Air Cargo', 'air'],
-            ['GB', 'GBLON', 'London Port',       'sea'],
-            ['GB', 'GBFXT', 'Felixstowe',        'sea'],
-            ['US', 'USNYC', 'New York Port',     'sea'],
-            ['US', 'USLAX', 'Los Angeles Port',  'sea'],
-            ['AE', 'AEJEA', 'Jebel Ali',         'sea'],
-            ['DE', 'DEHAM', 'Hamburg',           'sea'],
-            ['NL', 'NLRTM', 'Rotterdam',         'sea'],
-        ];
-
-        foreach ($ports as [$iso, $code, $name, $type]) {
-            Port::firstOrCreate(
-                ['code' => $code],
-                [
-                    'name'       => $name,
-                    'type'       => $type,
-                    'country_id' => Country::where('iso_code', $iso)->value('id'),
-                ]
-            );
-        }
+        // Col N — destination / load ports (AU, NZ, Pacific + worldwide).
+        $this->call(PortSeeder::class);
 
         // Col R. The incoterms an apparel exporter actually quotes on.
         $incoterms = [
@@ -177,8 +143,8 @@ class LookupSeeder extends Seeder
             );
         }
 
-        // Col S.
-        foreach (['Sea', 'Air', 'Courier', 'Land'] as $method) {
+        // Col S — dropdown on Buyer master (client: no free-text typing).
+        foreach (['Sea', 'Air', 'Air + Sea', 'Courier', 'Land', 'Road', 'Rail'] as $method) {
             ShipmentMethod::firstOrCreate(['name' => $method]);
         }
     }

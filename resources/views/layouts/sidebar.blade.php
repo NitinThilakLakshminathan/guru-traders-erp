@@ -47,30 +47,33 @@
 {{-- data-enable-persistence: AdminLTE defaults to off, which means the
      sidebar springs back open on every page load and the toggle is useless on
      a multi-screen app. On, it remembers the choice in localStorage. --}}
-<aside class="app-sidebar shadow-sm" data-bs-theme="light" data-enable-persistence="true">
+<aside class="app-sidebar shadow-sm" data-enable-persistence="true">
 
     <div class="sidebar-brand">
         <a href="{{ route('dashboard') }}" class="brand-link">
             <span class="brand-mark"><x-brand-logo :size="38" /></span>
-            <span class="brand-text">
-                Guru Traders
-                <small>Export ERP</small>
-            </span>
+            <span class="brand-text">Guru Traders</span>
         </a>
 
-        {{-- AdminLTE listens for [data-lte-toggle="sidebar"] anywhere on the
-             page, so this needs no wiring of its own. It is hidden once the
-             rail is collapsed — there is no room beside a hidden brand — but
-             hovering the rail expands it and brings the button back, and the
-             header hamburger works regardless. --}}
+        {{-- Single collapse control (Spire Zen style) — no hamburger in the header. --}}
         <button type="button" class="sidebar-toggle" data-lte-toggle="sidebar"
                 aria-label="Collapse sidebar" title="Collapse sidebar">
-            <i class="bi bi-chevron-double-left"></i>
+            <i class="bi bi-chevron-left"></i>
         </button>
     </div>
 
     <div class="sidebar-wrapper">
-        <nav class="mt-2">
+        <div class="sidebar-search px-3 pt-3 pb-2">
+            <label class="visually-hidden" for="sidebar-search">Search menu</label>
+            <div class="input-group input-group-sm sidebar-search-group">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input type="search" id="sidebar-search" class="form-control"
+                       placeholder="Search menu..." autocomplete="off">
+                <span class="input-group-text sidebar-search-kbd">/</span>
+            </div>
+        </div>
+
+        <nav>
             <ul class="nav sidebar-menu flex-column" data-lte-toggle="treeview" role="menu" data-accordion="false">
 
                 <li class="nav-item">
@@ -167,6 +170,14 @@
                             </a>
                         </li>
                     @endcan
+                    @can('trim-accessory.view')
+                        <li class="nav-item">
+                            <a href="{{ route('masters.trim-accessories.index') }}"
+                               class="nav-link {{ request()->routeIs('masters.trim-accessories.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-scissors"></i><p>Trim / Accessories</p>
+                            </a>
+                        </li>
+                    @endcan
                     @can('markup.view')
                         <li class="nav-item">
                             <a href="{{ route('masters.markups.index') }}"
@@ -252,14 +263,18 @@
                     @can('export-document.view')
                         <li class="nav-item">
                             <a href="{{ route('export.documents.index') }}"
-                               class="nav-link {{ request()->routeIs('export.documents.*') ? 'active' : '' }}">
-                                <i class="nav-icon bi bi-files"></i><p>Export Documents</p>
+                               class="nav-link {{ request()->routeIs('export.documents.*') ? 'active' : '' }}"
+                               title="Export Documents">
+                                <i class="nav-icon bi bi-file-earmark-text"></i>
+                                <p>Export Documents</p>
                             </a>
                         </li>
                         <li class="nav-item">
                             <a href="{{ route('export.ocr.index') }}"
-                               class="nav-link {{ request()->routeIs('export.ocr.*') ? 'active' : '' }}">
-                                <i class="nav-icon bi bi-stars"></i><p>Document OCR</p>
+                               class="nav-link {{ request()->routeIs('export.ocr.*') ? 'active' : '' }}"
+                               title="Document OCR">
+                                <i class="nav-icon bi bi-stars"></i>
+                                <p>Document OCR</p>
                             </a>
                         </li>
                     @endcan
@@ -270,9 +285,57 @@
                      that bill, we pay what is left, the buyer pays us, the agent
                      takes their cut.
                 --}}
-                @if($canAny(['purchase-bill.view', 'debit-note.view', 'payment.view', 'foreign-payment.view', 'agent-commission.view']))
+                @if($canAny(['billing.view', 'finance-tracker.view', 'voucher.view', 'budget.view', 'payroll.view', 'gst-filing.view', 'purchase-bill.view', 'debit-note.view', 'payment.view', 'foreign-payment.view', 'agent-commission.view']))
                     <li class="nav-header">Finance</li>
 
+                    @can('billing.view')
+                        <li class="nav-item">
+                            <a href="{{ route('finance.billing.index') }}"
+                               class="nav-link {{ request()->routeIs('finance.billing.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-receipt-cutoff"></i><p>Billing & Invoices</p>
+                            </a>
+                        </li>
+                    @endcan
+                    @can('finance-tracker.view')
+                        <li class="nav-item">
+                            <a href="{{ route('finance.tracker.index') }}"
+                               class="nav-link {{ request()->routeIs('finance.tracker.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-graph-up-arrow"></i><p>Finance Tracker</p>
+                            </a>
+                        </li>
+                    @endcan
+                    @can('voucher.view')
+                        <li class="nav-item">
+                            <a href="{{ route('finance.vouchers.index') }}"
+                               class="nav-link {{ request()->routeIs('finance.vouchers.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-journal-check"></i><p>Vouchers</p>
+                            </a>
+                        </li>
+                    @endcan
+                    @can('budget.view')
+                        <li class="nav-item">
+                            <a href="{{ route('finance.budget.index') }}"
+                               class="nav-link {{ request()->routeIs('finance.budget.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-bullseye"></i><p>Budget Planner</p>
+                            </a>
+                        </li>
+                    @endcan
+                    @can('payroll.view')
+                        <li class="nav-item">
+                            <a href="{{ route('finance.payroll.index') }}"
+                               class="nav-link {{ request()->routeIs('finance.payroll.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-person-badge"></i><p>Payroll & Salary</p>
+                            </a>
+                        </li>
+                    @endcan
+                    @can('gst-filing.view')
+                        <li class="nav-item">
+                            <a href="{{ route('finance.gst.index') }}"
+                               class="nav-link {{ request()->routeIs('finance.gst.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-file-earmark-spreadsheet"></i><p>GST Filings</p>
+                            </a>
+                        </li>
+                    @endcan
                     @can('purchase-bill.view')
                         <li class="nav-item">
                             <a href="{{ route('finance.purchase-bills.index') }}"
@@ -346,8 +409,9 @@
                      none had a screen, and a menu full of links that go
                      nowhere is worse than a short menu.
 
-                     User Management is a treeview because its three screens are
-                     one subject and are opened together.
+                     Users, Roles and Permissions are ordinary links, not a
+                     treeview: a parent href="#" never opened a page, and the
+                     nested items sat below the fold at the bottom of the rail.
 
                      No "My Profile" entry — the header's user dropdown already
                      carries Profile and Logout, top right on every page.
@@ -363,39 +427,30 @@
                             </a>
                         </li>
                     @endcan
-
-                    <li class="nav-item {{ request()->routeIs('user-management.*') && ! request()->routeIs('user-management.company-profile.*') ? 'menu-open' : '' }}">
-                        <a href="#" class="nav-link {{ request()->routeIs('user-management.*') ? 'active' : '' }}">
-                            <i class="nav-icon bi bi-people"></i>
-                            <p>User Management<i class="nav-arrow bi bi-chevron-right"></i></p>
-                        </a>
-                        <ul class="nav nav-treeview">
-                            @can('user.view')
-                                <li class="nav-item">
-                                    <a href="{{ route('user-management.users.index') }}"
-                                       class="nav-link {{ request()->routeIs('user-management.users.*') ? 'active' : '' }}">
-                                        <i class="nav-icon bi bi-dot"></i><p>Users</p>
-                                    </a>
-                                </li>
-                            @endcan
-                            @can('role.view')
-                                <li class="nav-item">
-                                    <a href="{{ route('user-management.roles.index') }}"
-                                       class="nav-link {{ request()->routeIs('user-management.roles.*') ? 'active' : '' }}">
-                                        <i class="nav-icon bi bi-dot"></i><p>Roles</p>
-                                    </a>
-                                </li>
-                            @endcan
-                            @can('permission.view')
-                                <li class="nav-item">
-                                    <a href="{{ route('user-management.permissions.index') }}"
-                                       class="nav-link {{ request()->routeIs('user-management.permissions.*') ? 'active' : '' }}">
-                                        <i class="nav-icon bi bi-dot"></i><p>Permissions</p>
-                                    </a>
-                                </li>
-                            @endcan
-                        </ul>
-                    </li>
+                    @can('user.view')
+                        <li class="nav-item">
+                            <a href="{{ route('user-management.users.index') }}"
+                               class="nav-link {{ request()->routeIs('user-management.users.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-people"></i><p>User Management</p>
+                            </a>
+                        </li>
+                    @endcan
+                    @can('role.view')
+                        <li class="nav-item">
+                            <a href="{{ route('user-management.roles.index') }}"
+                               class="nav-link {{ request()->routeIs('user-management.roles.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-shield-check"></i><p>Roles</p>
+                            </a>
+                        </li>
+                    @endcan
+                    @can('permission.view')
+                        <li class="nav-item">
+                            <a href="{{ route('user-management.permissions.index') }}"
+                               class="nav-link {{ request()->routeIs('user-management.permissions.*') ? 'active' : '' }}">
+                                <i class="nav-icon bi bi-key"></i><p>Permissions</p>
+                            </a>
+                        </li>
+                    @endcan
                 @endif
 
             </ul>

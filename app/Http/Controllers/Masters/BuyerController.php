@@ -15,6 +15,7 @@ use App\Models\Designation;
 use App\Models\Incoterm;
 use App\Models\PaymentTerm;
 use App\Models\Port;
+use App\Models\ShipmentMethod;
 use App\Models\State;
 use App\Services\Masters\BuyerService;
 use App\Services\NumberSeriesService;
@@ -47,7 +48,7 @@ class BuyerController extends Controller implements HasMiddleware
             new Middleware('permission:buyer.edit', only: ['edit', 'update', 'toggleStatus']),
             new Middleware('permission:buyer.delete', only: ['destroy']),
             // Reachable from either the create or the edit form.
-            new Middleware('permission:buyer.create|buyer.edit', only: ['storePaymentTerm', 'storeDesignation']),
+            new Middleware('permission:buyer.create|buyer.edit', only: ['storePaymentTerm', 'storeDesignation', 'storeShipmentMethod']),
         ];
     }
 
@@ -108,7 +109,7 @@ class BuyerController extends Controller implements HasMiddleware
             'buyer' => $buyer->load([
                 'categories:id,name', 'cartonMarkings', 'country', 'state', 'city', 'port',
                 'agent', 'contactDesignation', 'paymentTerm', 'incoterm', 'currency',
-                'currencies', 'incoterms', 'contacts.designation',
+                'currencies', 'incoterms', 'shipmentMethod', 'shipmentMethods', 'contacts.designation',
                 'creator', 'updater',
             ]),
         ]);
@@ -122,7 +123,7 @@ class BuyerController extends Controller implements HasMiddleware
         ) + [
             'buyer' => $buyer->load(
                 'categories:id', 'cartonMarkings', 'contacts',
-                'currencies:id', 'incoterms:id',
+                'currencies:id', 'incoterms:id', 'shipmentMethods:id',
             ),
         ]);
     }
@@ -202,6 +203,25 @@ class BuyerController extends Controller implements HasMiddleware
     }
 
     /**
+     * Quick-add for Shipment Method — same shape as storePaymentTerm().
+     * Returns the lookup id so Default / Accepted selects (keyed by id) can
+     * pick the new option immediately.
+     */
+    public function storeShipmentMethod(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:80'],
+        ]);
+
+        $method = ShipmentMethod::firstOrCreate(
+            ['name' => trim($data['name'])],
+            ['status' => 'active']
+        );
+
+        return response()->json(['id' => $method->id, 'name' => $method->name]);
+    }
+
+    /**
      * Dropdown sources shared by the create and edit forms.
      *
      * Only active rows: a retired port or incoterm must not be selectable on a
@@ -267,6 +287,7 @@ class BuyerController extends Controller implements HasMiddleware
             'paymentTerms'    => PaymentTerm::active()->forSide('buyer')->orderBy('name')->pluck('name', 'id'),
             'incoterms'       => Incoterm::active()->orderBy('code')->get()->pluck('label', 'id'),
             'currencies'      => Currency::active()->orderBy('iso_code')->get()->pluck('label', 'id'),
+            'shipmentMethods' => ShipmentMethod::active()->orderBy('name')->pluck('name', 'id'),
 
             /*
              * Which payment terms open the advance / at-sight boxes. Sent to the

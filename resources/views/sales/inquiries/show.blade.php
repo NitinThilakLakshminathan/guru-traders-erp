@@ -25,6 +25,7 @@
             <a href="{{ route('sales.inquiries.index') }}" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-arrow-left me-1"></i> Back
             </a>
+            <x-order-context-modal :order-context="$orderContext ?? ['available' => false]" modal-id="inquiryOrderContextModal" />
         </x-slot>
 
         <dl class="row mb-4">
@@ -45,10 +46,10 @@
             <dt class="col-sm-3 text-body-secondary fw-normal">Buyer</dt>
             <dd class="col-sm-9">{{ $inquiry->buyer?->company_name }} ({{ $inquiry->buyer?->display_code }})</dd>
 
-            <dt class="col-sm-3 text-body-secondary fw-normal">Category</dt>
+            <dt class="col-sm-3 text-body-secondary fw-normal">Default Category</dt>
             <dd class="col-sm-9">{{ $inquiry->category?->name ?? '—' }}</dd>
 
-            <dt class="col-sm-3 text-body-secondary fw-normal">Order Format</dt>
+            <dt class="col-sm-3 text-body-secondary fw-normal">Default Order Format</dt>
             <dd class="col-sm-9">{{ $inquiry->format?->name ?? '—' }} <span class="text-body-secondary">({{ $inquiry->format?->module }})</span></dd>
 
             <dt class="col-sm-3 text-body-secondary fw-normal">Agent</dt>
@@ -77,6 +78,8 @@
                 <thead class="table-light">
                     <tr>
                         <th>#</th>
+                        <th>Category</th>
+                        <th>Order Format</th>
                         <th>Design No.</th>
                         <th>Product</th>
                         <th>Supplier</th>
@@ -94,6 +97,8 @@
                     @forelse($inquiry->items as $item)
                         <tr>
                             <td>{{ $loop->iteration }}</td>
+                            <td class="small">{{ $item->category?->name ?? '—' }}</td>
+                            <td class="small">{{ $item->format?->name ?? '—' }}</td>
                             <td class="fw-semibold">
                                 {{ $item->design_no ?: '—' }}
                                 @if($item->custom_values)
