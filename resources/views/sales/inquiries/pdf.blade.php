@@ -65,7 +65,18 @@
     @endif
 
     @php
-        $columns  = $inquiry->format?->printColumns() ?? collect();
+        // H-05: this document (PDF download and the XLSX export, which
+        // renders this same view through PhpSpreadsheet's HTML reader) goes
+        // straight to the buyer. 'Cost' never appears here because it isn't
+        // one of the configurable format columns at all — but 'supplier' is,
+        // and an Order Format that enables it was printing the internal
+        // supplier's name/code (e.g. "A J Creation (AJC)") on the buyer's
+        // copy, disclosing who manufactures each line and the trading
+        // house's sourcing/margin. Always excluded here; there is no
+        // internal-facing variant of this document to preserve it in.
+        $columns  = ($inquiry->format?->printColumns() ?? collect())
+            ->reject(fn ($column) => $column->key === 'supplier')
+            ->values();
         $sizeTags = $columns->firstWhere('key', 'size')?->sub_columns ?? [];
         $firstUnit = $inquiry->items->first()?->unit;
     @endphp
@@ -158,6 +169,22 @@
                 </td>
             </tr>
         </table>
+    @endif
+
+    @php $refImages = $inquiry->format?->images ?? collect(); @endphp
+    @if($refImages->isNotEmpty())
+        <h3 style="margin-top:18px;font-size:12px;">Reference Images</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;">
+            @foreach($refImages as $image)
+                <div style="width:140px;text-align:center;">
+                    <img src="{{ $image->url }}" alt="{{ $image->original_name }}"
+                         style="width:140px;height:100px;object-fit:cover;border:1px solid #ccc;">
+                    @if($image->caption)
+                        <div style="font-size:10px;margin-top:4px;">{{ $image->caption }}</div>
+                    @endif
+                </div>
+            @endforeach
+        </div>
     @endif
 </body>
 </html>

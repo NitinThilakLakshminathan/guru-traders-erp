@@ -7,6 +7,7 @@ use App\Models\City;
 use App\Models\State;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 /**
  * Feeds the cascading Country -> State -> City dropdowns on the Buyer form.
@@ -19,6 +20,10 @@ use Illuminate\Http\Request;
  * The initial options are rendered server-side by BuyerController, so an edit
  * form shows the right state and city before any JavaScript runs. These
  * endpoints are only hit when the user actually changes a parent.
+ *
+ * Many ISO countries ship without seeded divisions. Store endpoints let the
+ * user type a missing state/city so export buyers outside the seed set are
+ * not blocked; firstOrCreate keeps duplicates from piling up.
  */
 class GeoController extends Controller
 {
@@ -50,12 +55,66 @@ class GeoController extends Controller
             return response()->json([]);
         }
 
-        return response()->json(
-            City::query()
-                ->active()
-                ->where('state_id', $request->integer('state_id'))
-                ->orderBy('name')
-                ->get(['id', 'name'])
+        $stateId = $request->integer('state_id');
+
+        $cities = City::query()
+            ->active()
+            ->where('state_id', $stateId)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return response()->json($cities);
+    }
+
+    /**
+     * Create (or reuse) a state under the selected country.
+     */
+    public function storeState(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'country_id' => ['required', 'integer', Rule::exists('countries', 'id')],
+            'name'       => ['required', 'string', 'max:120'],
+        ]);
+
+        $name = trim($data['name']);
+
+        $state = State::query()->firstOrCreate(
+            [
+                'country_id' => (int) $data['country_id'],
+                'name'       => $name,
+            ],
+            ['status' => 'active']
         );
+
+        return response()->json([
+            'id'   => $state->id,
+            'name' => $state->name,
+        ]);
+    }
+
+    /**
+     * Create (or reuse) a city under the selected state.
+     */
+    public function storeCity(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'state_id' => ['required', 'integer', Rule::exists('states', 'id')],
+            'name'     => ['required', 'string', 'max:120'],
+        ]);
+
+        $name = trim($data['name']);
+
+        $city = City::query()->firstOrCreate(
+            [
+                'state_id' => (int) $data['state_id'],
+                'name'     => $name,
+            ],
+            ['status' => 'active']
+        );
+
+        return response()->json([
+            'id'   => $city->id,
+            'name' => $city->name,
+        ]);
     }
 }

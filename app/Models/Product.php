@@ -4,10 +4,12 @@ namespace App\Models;
 
 use App\Models\Concerns\Filterable;
 use App\Models\Concerns\HasAuditColumns;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 
 class Product extends Model
 {
@@ -27,6 +29,7 @@ class Product extends Model
         'category_id',
         'item_group_code',
         'name',
+        'image_path',
         'name_on_export_document',
         'barcode',
         'unit_po',
@@ -35,6 +38,7 @@ class Product extends Model
         'drawback_sr_no',
         'price_band_id',
         'gst_rate_id',
+        'bom_id',
         'fabric_length_mtr',
         'fabric_width_inch',
         'description',
@@ -52,6 +56,10 @@ class Product extends Model
             'fabric_length_mtr' => 'decimal:3',
             'fabric_width_inch' => 'decimal:3',
             'sq_mtr_per_unit'   => 'decimal:4',
+            // L-03: deliberately not in $fillable above — this is written by
+            // an importer, not by the product form, and keeping it out of
+            // mass assignment means a normal edit can never clobber it.
+            'import_meta'       => 'array',
         ];
     }
 
@@ -76,6 +84,11 @@ class Product extends Model
         return $this->belongsTo(GstRate::class);
     }
 
+    public function bom(): BelongsTo
+    {
+        return $this->belongsTo(Bom::class);
+    }
+
     public function incentives(): HasMany
     {
         return $this->hasMany(ProductIncentive::class);
@@ -94,6 +107,32 @@ class Product extends Model
     public function incentive(string $scheme): ?ProductIncentive
     {
         return $this->incentives->firstWhere('scheme', $scheme);
+    }
+
+    /** Full public URL of the product's small reference photo, or null. */
+    protected function imageUrl(): Attribute
+    {
+        return Attribute::get(fn () => $this->image_path ? Storage::disk('public')->url($this->image_path) : null);
+    }
+
+    /**
+     * L-02: a lot of imported products carry their own Item Code as a
+     * "(CODE)" suffix baked into the name itself (e.g. "GIRLS KURTA WITH
+     * GAHARARA-12X18 (370AAB)"), duplicating the Item Code column shown
+     * right next to it everywhere the name appears. Stripped here at
+     * display time rather than rewritten in the database — that would need
+     * a data migration and sign-off on which of ~589 rows are safe to
+     * touch, out of scope for a read-only-verified UI fix.
+     */
+    public function displayName(): string
+    {
+        $code = (string) $this->item_group_code;
+
+        if ($code === '') {
+            return $this->name;
+        }
+
+        return preg_replace('/\s*\(' . preg_quote($code, '/') . '\)\s*$/i', '', $this->name) ?: $this->name;
     }
 
     /*

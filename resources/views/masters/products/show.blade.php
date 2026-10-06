@@ -1,7 +1,7 @@
 <x-app-layout>
     <x-slot name="header">Product Details</x-slot>
 
-    <x-ui.card title="{{ $product->item_group_code }} — {{ $product->name }}" variant="primary">
+    <x-ui.card title="{{ $product->item_group_code }} — {{ $product->displayName() }}" variant="primary"> {{-- L-02 --}}
         <x-slot name="actions">
             @can('product.edit')
                 <a href="{{ route('masters.products.edit', $product) }}" class="btn btn-sm btn-primary">
@@ -59,6 +59,9 @@
         </div>
 
         <h6 class="text-uppercase text-body-secondary fw-bold small border-bottom pb-2 mb-3">Export Incentives</h6>
+        <p class="small text-body-secondary mb-2">
+            Claim = <strong>min</strong>( Rate&nbsp;% × FOB value , Cap value × PCS ). Rate side uses the stored %; cap is per piece.
+        </p>
         @if($product->incentives->isEmpty())
             <p class="text-body-secondary small">No incentive schemes recorded for this product.</p>
         @else
@@ -69,22 +72,28 @@
                             <th>Scheme</th>
                             <th class="text-end">Rate %</th>
                             <th class="text-end">Rate % 2</th>
-                            <th class="text-end">Cap Value</th>
+                            <th class="text-end">Cap / PCS</th>
+                            <th class="text-end">Cap 2 / PCS</th>
                             <th>Calculated On</th>
+                            <th class="text-end">Example claim*</th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach($product->incentives as $incentive)
+                            @php $example = $incentive->claimBreakdown(10000, 100); @endphp
                             <tr>
                                 <td class="fw-semibold">{{ $incentive->schemeLabel() }}</td>
                                 <td class="text-end">{{ $incentive->percent_1 ?? '—' }}</td>
                                 <td class="text-end">{{ $incentive->percent_2 ?? '—' }}</td>
                                 <td class="text-end">{{ $incentive->cap_value ?? '—' }}</td>
+                                <td class="text-end">{{ $incentive->cap_value_2 ?? '—' }}</td>
                                 <td class="text-body-secondary">{{ $incentive->calculationBasis?->name ?: '—' }}</td>
+                                <td class="text-end font-monospace">{{ number_format($example['claim'], 2) }}</td>
                             </tr>
                         @endforeach
                     </tbody>
                 </table>
+                <div class="form-text">* Example uses FOB ₹10,000 and 100 PCS — same min(Rate×FOB, Cap×PCS) rule (RoSCTL with 2 caps = both legs).</div>
             </div>
         @endif
 
@@ -109,11 +118,15 @@
                     <dt class="col-sm-5 text-body-secondary fw-normal">Description</dt>
                     <dd class="col-sm-7">{{ $product->description ?: '—' }}</dd>
 
-                    <dt class="col-sm-5 text-body-secondary fw-normal">Remarks</dt>
+                    <dt class="col-sm-5 text-body-secondary fw-normal">Internal Notes</dt>
                     <dd class="col-sm-7">{{ $product->remarks ?: '—' }}</dd>
 
-                    <dt class="col-sm-5 text-body-secondary fw-normal">Comments</dt>
-                    <dd class="col-sm-7">{{ $product->comments ?: '—' }}</dd>
+                    @if($product->comments)
+                        {{-- L-07: legacy field — only shown when a product actually has
+                             data in it, so it doesn't read as a fourth active field. --}}
+                        <dt class="col-sm-5 text-body-secondary fw-normal">Comments <span class="small">(legacy)</span></dt>
+                        <dd class="col-sm-7">{{ $product->comments }}</dd>
+                    @endif
 
                     <dt class="col-sm-5 text-body-secondary fw-normal">Created</dt>
                     <dd class="col-sm-7 text-body-secondary small">
@@ -130,8 +143,48 @@
             </div>
             <div class="col-12 mt-2">
                 <h6 class="text-uppercase text-body-secondary fw-bold small border-bottom pb-2 mb-3">BOM / Components</h6>
+                @if($product->bom)
+                    <p class="mb-2">Pack: <strong>{{ $product->bom->name }}</strong>
+                        @can('bom.view')
+                            <a href="{{ route('masters.boms.show', $product->bom) }}" class="small ms-1">Open in BOM master</a>
+                        @endcan
+                    </p>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width:52px">Photo</th>
+                                    <th>Trim / Accessory</th>
+                                    <th>Size</th>
+                                    <th class="text-end">Qty</th>
+                                    <th class="text-end">Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($product->bom->lines as $line)
+                                    <tr>
+                                        <td>
+                                            @if($line->image_url)
+                                                <img src="{{ $line->image_url }}" alt="{{ $line->component_name }}"
+                                                     class="rounded border" style="width:32px;height:32px;object-fit:cover">
+                                            @else
+                                                —
+                                            @endif
+                                        </td>
+                                        <td>{{ $line->component_name }}</td>
+                                        <td>{{ $line->size ?: '—' }}</td>
+                                        <td class="text-end font-monospace">{{ $line->qty }}</td>
+                                        <td class="text-end font-monospace">{{ $line->rate !== null ? $line->rate : '—' }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
                 @if($product->bomItems->isEmpty())
-                    <p class="text-body-secondary small mb-0">No BOM components.</p>
+                    @unless($product->bom)
+                        <p class="text-body-secondary small mb-0">No BOM components.</p>
+                    @endunless
                 @else
                     <div class="table-responsive">
                         <table class="table table-sm align-middle mb-0">

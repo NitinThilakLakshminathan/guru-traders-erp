@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Snapshot of a Product BOM line on an inquiry item.
@@ -17,7 +19,10 @@ class InquiryItemBomLine extends Model
         'inquiry_item_id',
         'sort_order',
         'component_name',
+        'size',
         'qty',
+        'rate',
+        'image_path',
         'unit',
         'is_custom',
         'remarks',
@@ -28,12 +33,24 @@ class InquiryItemBomLine extends Model
         return [
             'sort_order' => 'integer',
             'qty'        => 'decimal:4',
+            'rate'       => 'decimal:4',
             'is_custom'  => 'boolean',
         ];
+    }
+
+    /** Consumption × Rate for one finished piece. */
+    public function lineTotal(): float
+    {
+        return round((float) $this->qty * (float) ($this->rate ?? 0), 4);
     }
 
     public function inquiryItem(): BelongsTo
     {
         return $this->belongsTo(InquiryItem::class);
+    }
+
+    protected function imageUrl(): Attribute
+    {
+        return Attribute::get(fn () => $this->image_path ? Storage::disk('public')->url($this->image_path) : null);
     }
 }

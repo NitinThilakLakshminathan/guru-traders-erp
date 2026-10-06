@@ -18,6 +18,8 @@ class InquiryItem extends Model
 
     protected $fillable = [
         'sort_order',
+        'category_id',
+        'document_format_id',
         'design_no',
         'description',
         'product_id',
@@ -26,6 +28,8 @@ class InquiryItem extends Model
         'fob_value_id',
         'price',
         'cost_price',
+        'bom_cost',
+        'fob_unit',
         'qty',
         'amount',
         'status',
@@ -39,6 +43,8 @@ class InquiryItem extends Model
             'sort_order'    => 'integer',
             'price'         => 'decimal:2',
             'cost_price'    => 'decimal:2',
+            'bom_cost'      => 'decimal:2',
+            'fob_unit'      => 'decimal:4',
             'qty'           => 'integer',
             'amount'        => 'decimal:2',
             'custom_values' => 'array',
@@ -48,6 +54,16 @@ class InquiryItem extends Model
     public function inquiry(): BelongsTo
     {
         return $this->belongsTo(Inquiry::class);
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(Category::class);
+    }
+
+    public function format(): BelongsTo
+    {
+        return $this->belongsTo(DocumentFormat::class, 'document_format_id');
     }
 
     public function product(): BelongsTo

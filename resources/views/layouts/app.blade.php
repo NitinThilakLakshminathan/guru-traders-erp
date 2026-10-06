@@ -1,31 +1,104 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" data-bs-theme="dark">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
+        <script>
+            (function () {
+                try {
+                    var t = localStorage.getItem('guru_theme') || 'dark';
+                    document.documentElement.setAttribute('data-bs-theme', t);
+                } catch (e) { /* private mode */ }
+            })();
+        </script>
 
-        <title>{{ config('app.name', 'Guru Traders ERP') }}</title>
+        {{-- M-09: was a hardcoded, identical title on every single page —
+             tabs, history and bookmarks were all indistinguishable, even the
+             500 error page read the same as a working screen. 82 views
+             already pass a clean, human-readable page name through the
+             existing $header slot (see the app-content header further
+             below), so reusing it here needs no per-page changes at all. --}}
+        <title>{{ isset($header) && trim((string) $header) !== '' ? strip_tags($header).' - '.config('app.name', 'Guru Traders ERP') : config('app.name', 'Guru Traders ERP') }}</title>
 
         <!-- Fonts -->
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/source-sans-3@5.0.12/index.css" />
+        {{-- CDN icons as fallback when Vite font paths break under /guru-traders/ --}}
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
 
         <!-- Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
         @stack('styles')
 
         <style>
+            body, html, input, button, select, textarea, h1, h2, h3, h4, h5, h6, .navbar-brand, .brand-text {
+                font-family: 'Source Sans 3', sans-serif;
+            }
+
+            /* Brand mark — yellow GT tile like Spire Zen / Garment */
+            .app-sidebar .brand-mark > div {
+                background-color: #c9a227 !important;
+                box-shadow: 0 2px 6px rgba(201, 162, 39, .35) !important;
+                border-radius: 10px !important;
+            }
+            .app-sidebar .brand-text {
+                font-weight: 700;
+                font-size: 1rem;
+                color: #ffffff;
+            }
+            .app-sidebar .brand-text small { display: none; }
+
+            /* Sidebar search (Spire Zen style) */
+            .app-sidebar .sidebar-search-group {
+                border-radius: 999px;
+                overflow: hidden;
+            }
+            .app-sidebar .sidebar-search-group .input-group-text,
+            .app-sidebar .sidebar-search-group .form-control {
+                background: #1e293b;
+                border-color: rgba(255,255,255,.12);
+                color: #e2e8f0;
+                font-size: .8rem;
+            }
+            .app-sidebar .sidebar-search-group .form-control::placeholder {
+                color: #94a3b8;
+            }
+            .app-sidebar .sidebar-search-group .form-control:focus {
+                box-shadow: none;
+                background: #1e293b;
+                color: #f8fafc;
+            }
+            .app-sidebar .sidebar-search-kbd {
+                font-size: .7rem;
+                color: #94a3b8;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            }
+            [data-bs-theme="light"] .app-sidebar .sidebar-search-group .input-group-text,
+            [data-bs-theme="light"] .app-sidebar .sidebar-search-group .form-control {
+                background: #f3f6fa;
+                border-color: #e9edf2;
+                color: #111827;
+            }
+            [data-bs-theme="light"] .app-sidebar .brand-text {
+                color: #111827;
+            }
+
             /* ============================ SIDEBAR — LIGHT ============================ */
             .app-sidebar {
                 background: #ffffff;
                 border-right: 1px solid #e9edf2;
             }
 
-            /* Brand */
+            /* Brand — AdminLTE fixes height at 3.5rem + overflow:hidden, which
+               clips the GT mark (38px) once we stack logo + toggle when collapsed.
+               Grow with content and keep the mark fully visible. */
             .app-sidebar .sidebar-brand {
                 background: #ffffff;
                 border-bottom: 1px solid #eef1f5;
-                padding: .9rem 1rem;
+                height: auto;
+                min-height: 3.5rem;
+                overflow: visible;
+                padding: .75rem 1rem;
                 display: flex; align-items: center; gap: .5rem;
             }
             .app-sidebar .brand-link {
@@ -87,9 +160,19 @@
                 display: flex; align-items: center;
                 transition: background-color .12s ease, color .12s ease;
             }
+            .app-sidebar .sidebar-menu .nav-link > p {
+                margin: 0;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                flex: 1 1 auto;
+                min-width: 0;
+                display: block;
+            }
             .app-sidebar .sidebar-menu .nav-link .nav-icon {
                 font-size: 1rem;
                 width: 1.5rem;
+                flex-shrink: 0;
                 color: #8b95a5;
                 transition: color .12s ease;
             }
@@ -134,48 +217,103 @@
             }
 
             /* ==================== SIDEBAR — COLLAPSED (icon rail) ====================
-               AdminLTE narrows the aside to 4.6rem and hides every <p> for us,
-               and re-expands it on hover. Three things it cannot know about
-               this theme are corrected below. All of them are scoped with
-               :not(:hover) so the hover-expanded rail stays identical to the
-               normal sidebar. */
+               Spire Zen style: GT mark + → on top, then icons only.
+               sidebar-without-hover keeps this rail even while the mouse is on it. */
 
-            /* 1. Our links carry a .6rem side margin, which pushes AdminLTE's
-                  3.6rem link past the 4.6rem rail and knocks the icons off
-                  centre. Centre them on the rail instead. */
-            .sidebar-mini.sidebar-collapse .app-sidebar:not(:hover) .sidebar-menu .nav-link {
-                margin-left: auto; margin-right: auto;
-                padding-left: 0; padding-right: 0;
-                justify-content: center;
+            .sidebar-mini.sidebar-collapse .app-sidebar {
+                width: 4.6rem !important;
+                min-width: 4.6rem !important;
+                max-width: 4.6rem !important;
+                overflow-x: hidden !important;
             }
-            .sidebar-mini.sidebar-collapse .app-sidebar:not(:hover) .sidebar-menu .nav-icon {
-                width: auto;
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-wrapper {
+                overflow-x: hidden !important;
             }
-            /* The active marker is an inset left edge — invisible once the link
-               is centred, so the collapsed state shows it as a filled pill. */
-            .sidebar-mini.sidebar-collapse .app-sidebar:not(:hover) .sidebar-menu .nav-link.active {
-                box-shadow: none; background: #e0eaff;
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-search {
+                display: none !important;
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .brand-text,
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-link > p,
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-link p {
+                display: none !important;
+                width: 0 !important;
+                max-width: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                visibility: hidden !important;
+                overflow: hidden !important;
+            }
+            /* Keep a hairline between sections (labels are gone). */
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-header {
+                display: block !important;
+                height: 0 !important;
+                overflow: hidden !important;
+                padding: .45rem 0 0 !important;
+                margin: .35rem .75rem 0 !important;
+                font-size: 0 !important;
+                color: transparent !important;
+                border-top: 1px solid rgba(255, 255, 255, 0.12);
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-link {
+                margin-left: auto !important;
+                margin-right: auto !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+                justify-content: center !important;
+                width: 3.6rem !important;
+                max-width: 100% !important;
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-icon {
+                width: auto !important;
+                margin: 0 !important;
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-menu .nav-link.active {
+                box-shadow: inset 3px 0 0 #c9a227 !important;
+                background: rgba(201, 162, 39, 0.28) !important;
+            }
+            /* Logo on top, expand chevron under it (Spire Zen). */
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-brand {
+                flex-direction: column !important;
+                align-items: center !important;
+                justify-content: flex-start !important;
+                flex-wrap: nowrap !important;
+                height: auto !important;
+                min-height: 0 !important;
+                overflow: visible !important;
+                padding: .85rem .4rem .7rem !important;
+                gap: .45rem !important;
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .brand-link {
+                justify-content: center !important;
+                flex: 0 0 auto !important;
+                width: auto !important;
+                gap: 0 !important;
+                line-height: 0;
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .brand-mark {
+                width: 34px;
+                height: 34px;
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .brand-mark > div {
+                width: 34px !important;
+                height: 34px !important;
+                line-height: 34px !important;
+                font-size: 13px !important;
+                border-radius: 9px !important;
+            }
+            .sidebar-mini.sidebar-collapse .app-sidebar .sidebar-toggle {
+                display: grid !important;
+                margin: 0 auto !important;
+                flex: 0 0 auto !important;
+                width: 28px;
+                height: 28px;
             }
 
-            /* 2. Section headers are display:none when collapsed, so seven
-                  groups run together as one undifferentiated strip of icons.
-                  A hairline keeps the grouping readable without the words. */
-            .sidebar-mini.sidebar-collapse .app-sidebar:not(:hover) .sidebar-menu .nav-header {
-                display: block;
-                height: 0; overflow: hidden;
-                padding: .45rem 0 0; margin: .35rem .9rem 0;
-                border-top: 1px solid #eef1f5;
+            /* Smooth transition when rail expands on hover */
+            .sidebar-mini.sidebar-collapse .app-sidebar:hover {
+                box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.15) !important;
+                z-index: 1039;
             }
-
-            /* 3. No room for the collapse button beside a hidden brand.
-                  Hovering the rail expands it and brings the button back, and
-                  the header hamburger works either way. */
-            .sidebar-mini.sidebar-collapse .app-sidebar:not(:hover) .sidebar-toggle { display: none; }
-            .sidebar-mini.sidebar-collapse .app-sidebar:not(:hover) .sidebar-brand {
-                justify-content: center; padding-left: .5rem; padding-right: .5rem;
-            }
-            /* Points the way it will move. */
-            .sidebar-mini.sidebar-collapse .sidebar-toggle i { transform: rotate(180deg); }
 
             /* Below the expand breakpoint the sidebar is an off-canvas drawer,
                not a rail: mini mode there would leave a 4.6rem strip of icons
@@ -183,8 +321,9 @@
                Same specificity as AdminLTE's rule, declared later, so it wins. */
             @media (max-width: 991.98px) {
                 .sidebar-mini.sidebar-collapse .app-sidebar {
-                    min-width: var(--lte-sidebar-width);
-                    max-width: var(--lte-sidebar-width);
+                    width: var(--lte-sidebar-width) !important;
+                    min-width: var(--lte-sidebar-width) !important;
+                    max-width: var(--lte-sidebar-width) !important;
                     margin-left: calc(var(--lte-sidebar-width) * -1);
                 }
             }
@@ -197,10 +336,10 @@
             .app-sidebar .sidebar-wrapper::-webkit-scrollbar-thumb:hover { background: #c8cfd8; }
 
             /* ============================ CONTENT ============================ */
-            body { background: #f5f7fa; }
-            .app-header { border-bottom: 1px solid #e9edf2; }
-            .card { border: 1px solid #e9edf2; }
-            .app-content-header h3 { font-weight: 600; color: #111827; }
+            body { background: var(--erp-bg, #0b0f19); }
+            .app-header { border-bottom: 1px solid var(--erp-card-border, #e9edf2); }
+            .card { border: 1px solid var(--erp-card-border, #e9edf2); }
+            .app-content-header h3 { font-weight: 600; color: var(--erp-text-main, #111827); }
 
             /* Permission matrix */
             .matrix-table th { font-weight: 600; font-size: .8125rem; white-space: nowrap; }
@@ -295,6 +434,17 @@
                 background: linear-gradient(to top, #fff 70%, rgba(255,255,255,0));
                 border-top: 1px solid #e9edf2;
             }
+            /* Sticky works on desktop because there's room beside the form fields
+               for it to float without covering anything. On a phone the form is
+               full-width, so a sticky footer sits directly on top of whatever the
+               user just scrolled to (C-05) — drop it back into normal flow instead. */
+            @media (max-width: 767.98px) {
+                .form-actions {
+                    position: static;
+                    background: none;
+                    flex-wrap: wrap;
+                }
+            }
 
             /* Required marker */
             .form-label .req { color: var(--bs-danger); font-weight: 400; }
@@ -361,18 +511,37 @@
             /* Reference images — thumbnails with a keep/remove tick, so a save
                that drops one is a deliberate act rather than a side effect. */
             .reference-image {
-                display: block; width: 8rem;
+                display: block; width: 10rem;
                 border: 1px solid #e9edf2; border-radius: 8px;
                 overflow: hidden; background: #fff;
             }
             .reference-image img {
-                display: block; width: 100%; height: 6rem; object-fit: cover;
+                display: block; width: 100%; height: 7rem; object-fit: cover;
             }
             .reference-image-keep {
                 display: flex; align-items: center; gap: .35rem;
                 padding: .3rem .5rem;
                 border-top: 1px solid #eef1f5;
                 font-size: .75rem; color: #6b7280;
+            }
+            .reference-image-caption {
+                border: 0; border-top: 1px solid #eef1f5; border-radius: 0;
+                font-size: .75rem; padding: .35rem .5rem;
+            }
+
+            /* Export incentives — room for TomSelect dropdowns so they are not clipped. */
+            .incentives-grid-wrap {
+                overflow: visible;
+                min-height: 16rem;
+                padding-bottom: 4rem;
+            }
+            .incentives-grid td {
+                padding-top: .75rem !important;
+                padding-bottom: .75rem !important;
+                vertical-align: top;
+            }
+            .incentives-grid .ts-dropdown {
+                z-index: 20;
             }
 
             /* The three formula lines on the Markup master, printed under the
@@ -414,9 +583,9 @@
             }
         </style>
     </head>
-    {{-- sidebar-mini turns the collapse into a 4.6rem icon rail instead of
-         hiding the sidebar outright, so the menu is still one click away. --}}
-    <body class="layout-fixed sidebar-expand-lg sidebar-mini bg-body-tertiary">
+    {{-- sidebar-mini = icon rail when collapsed.
+         sidebar-without-hover = stay icon-only (no hover-expand), like Spire Zen. --}}
+    <body class="layout-fixed sidebar-expand-lg sidebar-mini sidebar-without-hover bg-body-tertiary guru-traders-theme">
         <script>
             /**
              * Apply the remembered sidebar state before the first paint.
@@ -447,6 +616,46 @@
 
             <!-- Sidebar -->
             @include('layouts.sidebar')
+            <script>
+                /**
+                 * Keep the sidebar scrolled to the item just clicked.
+                 *
+                 * A full page load otherwise resets .sidebar-wrapper to the top,
+                 * so Finance / Administration clicks look like a jump back to
+                 * Dashboard. Restore the last scroll, then bring the active
+                 * link into view if it still sits outside the rail.
+                 */
+                (function () {
+                    var wrap = document.querySelector('.app-sidebar .sidebar-wrapper');
+                    if (!wrap) return;
+
+                    var key = 'lte.sidebar.scrollTop';
+
+                    try {
+                        var saved = sessionStorage.getItem(key);
+                        if (saved !== null) {
+                            wrap.scrollTop = parseInt(saved, 10) || 0;
+                        }
+                    } catch (e) { /* private mode */ }
+
+                    var active = wrap.querySelector('.sidebar-menu a.nav-link.active');
+                    if (active) {
+                        var wrapBox = wrap.getBoundingClientRect();
+                        var itemBox = active.getBoundingClientRect();
+                        if (itemBox.bottom > wrapBox.bottom || itemBox.top < wrapBox.top) {
+                            active.scrollIntoView({ block: 'center' });
+                        }
+                    }
+
+                    var persist = function () {
+                        try { sessionStorage.setItem(key, String(wrap.scrollTop)); } catch (e) {}
+                    };
+
+                    wrap.addEventListener('scroll', persist, { passive: true });
+                    wrap.addEventListener('click', persist);
+                    window.addEventListener('pagehide', persist);
+                })();
+            </script>
 
             <!-- App Main -->
             <main class="app-main">
@@ -492,10 +701,32 @@
                             </div>
                         @endif
 
-                        {{ $slot }}
+                        {{ $slot ?? '' }}
+                        @yield('content')
                     </div>
                 </div>
             </main>
+        </div>
+
+        {{-- M-04: shared confirm dialog for every destructive form.js-confirm
+             action (Delete buttons across every list, "Sync from Config",
+             etc.) — a native window.confirm() looked out of place against
+             the rest of this Bootstrap UI, so one modal replaces it
+             everywhere instead of each screen rolling its own. --}}
+        <div class="modal fade" id="app-confirm-modal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Please confirm</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" id="app-confirm-modal-body"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-danger" id="app-confirm-modal-accept">Confirm</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <script>
@@ -507,12 +738,52 @@
 
             // One confirm handler for every destructive form, instead of an
             // inline onsubmit="return confirm(...)" repeated on each one.
+            // M-04: was window.confirm() — replaced with the app's own
+            // Bootstrap modal (#app-confirm-modal) so a destructive action's
+            // confirmation looks like the rest of this UI instead of a
+            // native browser dialog. data-confirm is read via .dataset,
+            // which the browser already HTML-decodes for us, so this needs
+            // no manual unescaping of the text set in Blade.
+            var confirmModalEl = document.getElementById('app-confirm-modal');
+            var confirmModal = confirmModalEl ? new bootstrap.Modal(confirmModalEl) : null;
+            var confirmModalBody = document.getElementById('app-confirm-modal-body');
+            var confirmModalAccept = document.getElementById('app-confirm-modal-accept');
+            var pendingConfirmForm = null;
+
             document.querySelectorAll('form.js-confirm').forEach(function (form) {
                 form.addEventListener('submit', function (e) {
-                    if (! window.confirm(form.dataset.confirm || 'Are you sure?')) {
-                        e.preventDefault();
+                    if (form.dataset.confirmed === '1') {
+                        return; // already accepted via the modal below
                     }
+
+                    e.preventDefault();
+
+                    if (! confirmModal) {
+                        // Fallback if Bootstrap's JS somehow failed to load.
+                        if (window.confirm(form.dataset.confirm || 'Are you sure?')) {
+                            form.dataset.confirmed = '1';
+                            form.submit();
+                        }
+                        return;
+                    }
+
+                    pendingConfirmForm = form;
+                    confirmModalBody.textContent = form.dataset.confirm || 'Are you sure?';
+                    confirmModal.show();
                 });
+            });
+
+            confirmModalAccept?.addEventListener('click', function () {
+                confirmModal.hide();
+                if (pendingConfirmForm) {
+                    pendingConfirmForm.dataset.confirmed = '1';
+                    pendingConfirmForm.submit();
+                    pendingConfirmForm = null;
+                }
+            });
+
+            confirmModalEl?.addEventListener('hidden.bs.modal', function () {
+                pendingConfirmForm = null;
             });
 
             // Modules that have no screen yet.
@@ -531,15 +802,119 @@
                 var describe = function () {
                     var collapsed = document.body.classList.contains('sidebar-collapse');
                     var label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+                    var icon = toggle.querySelector('i');
 
                     toggle.title = label;
                     toggle.setAttribute('aria-label', label);
                     toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                    if (icon) {
+                        icon.className = collapsed ? 'bi bi-chevron-right' : 'bi bi-chevron-left';
+                    }
                 };
+
+                // Own the click (capture) so AdminLTE cannot double-toggle.
+                // Result: body.sidebar-collapse → 4.6rem icon rail.
+                toggle.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+
+                    var collapsed = document.body.classList.contains('sidebar-collapse');
+                    if (collapsed) {
+                        document.body.classList.remove('sidebar-collapse');
+                        document.body.classList.add('sidebar-open');
+                    } else {
+                        document.body.classList.add('sidebar-collapse');
+                        document.body.classList.remove('sidebar-open');
+                    }
+
+                    try {
+                        localStorage.setItem(
+                            'lte.sidebar.state',
+                            document.body.classList.contains('sidebar-collapse')
+                                ? 'sidebar-collapse'
+                                : 'sidebar-open'
+                        );
+                    } catch (err) { /* private mode */ }
+
+                    describe();
+                    sidebar.dispatchEvent(new CustomEvent(
+                        document.body.classList.contains('sidebar-collapse')
+                            ? 'collapsed.lte.push-menu'
+                            : 'opened.lte.push-menu'
+                    ));
+                }, true);
 
                 sidebar.addEventListener('opened.lte.push-menu', describe);
                 sidebar.addEventListener('collapsed.lte.push-menu', describe);
                 describe();
+            }
+
+            // Mobile menu button, in the header (C-05). Deliberately separate from
+            // the desktop collapse/expand toggle above: on a phone the sidebar starts
+            // fully off-canvas (neither .sidebar-collapse nor .sidebar-open), and the
+            // collapse/expand pair above only flips between those two — starting from
+            // the true default it takes a wasted click before it ever shows anything.
+            // This button always means "show it", full stop, and the overlay/nav-link
+            // click always means "hide it".
+            var mobileToggle = document.getElementById('mobileSidebarToggle');
+            var mobileOverlay = document.querySelector('[data-mobile-sidebar-close]');
+
+            var closeMobileSidebar = function () {
+                document.body.classList.remove('sidebar-open');
+            };
+
+            if (mobileToggle) {
+                mobileToggle.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    document.body.classList.remove('sidebar-collapse');
+                    document.body.classList.add('sidebar-open');
+                });
+            }
+
+            if (mobileOverlay) {
+                mobileOverlay.addEventListener('click', closeMobileSidebar);
+            }
+
+            // Tapping a real link in the drawer should close it behind you, not
+            // leave it open over the next page while it loads.
+            document.querySelectorAll('.app-sidebar .sidebar-menu a.nav-link[href]:not([href="#"])')
+                .forEach(function (link) {
+                    link.addEventListener('click', closeMobileSidebar);
+                });
+
+            // Sidebar menu search (/ focuses the box, Spire Zen style)
+            var search = document.getElementById('sidebar-search');
+            if (search) {
+                var filterMenu = function () {
+                    var q = search.value.trim().toLowerCase();
+                    document.querySelectorAll('.sidebar-menu > .nav-item').forEach(function (item) {
+                        var link = item.querySelector(':scope > .nav-link');
+                        if (! link) {
+                            return;
+                        }
+                        var label = (link.querySelector('p')?.textContent || '').toLowerCase();
+                        item.classList.toggle('d-none', q !== '' && label.indexOf(q) === -1);
+                    });
+                    document.querySelectorAll('.sidebar-menu > .nav-header').forEach(function (header) {
+                        var el = header.nextElementSibling;
+                        var any = false;
+                        while (el && ! el.classList.contains('nav-header')) {
+                            if (el.classList.contains('nav-item') && ! el.classList.contains('d-none')) {
+                                any = true;
+                            }
+                            el = el.nextElementSibling;
+                        }
+                        header.classList.toggle('d-none', q !== '' && ! any);
+                    });
+                };
+                search.addEventListener('input', filterMenu);
+                document.addEventListener('keydown', function (e) {
+                    if (e.key !== '/' || e.target.closest('input, textarea, select, [contenteditable]')) {
+                        return;
+                    }
+                    e.preventDefault();
+                    search.focus();
+                });
             }
         });
         </script>

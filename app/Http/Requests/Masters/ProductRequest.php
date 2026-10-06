@@ -52,14 +52,24 @@ abstract class ProductRequest extends FormRequest
 
         $rules = [
             'category_id'             => ['required', 'integer', Rule::exists('categories', 'id')],
-            // Max 5 characters, letters and numbers only — same convention as
-            // Buyer and Agent display codes.
-            'item_group_code'         => ['required', 'string', 'max:5', 'regex:/^[A-Z0-9]+$/', Rule::unique('products', 'item_group_code')->ignore($ignore)],
+            // H-03: was max:5, but imported data already has 6-character
+            // codes (370AAB / 370AAA — the longest across all 589 existing
+            // products), so a rule of 5 rejected saving those on Edit. 6
+            // matches the real data instead of the original, unverified
+            // convention borrowed from Buyer/Agent codes.
+            'item_group_code'         => ['required', 'string', 'max:6', 'regex:/^[A-Z0-9]+$/', Rule::unique('products', 'item_group_code')->ignore($ignore)],
             'name'                    => ['required', 'string', 'max:200', Rule::unique('products', 'name')->ignore($ignore)],
             'name_on_export_document' => ['nullable', 'string', 'max:255'],
 
             // Sheet: "barcode (needs to have text and number allowed)".
             'barcode'                 => ['nullable', 'string', 'max:60'],
+
+            // Small reference photo shown as a thumbnail on the Inquiry item
+            // table and BOM trims panel — "I need a small image against every
+            // line" (09-Sep call). Optional; existing photo is cleared via
+            // remove_image rather than requiring a fresh upload every save.
+            'image'                   => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'remove_image'            => ['nullable', 'boolean'],
 
             // Typed, not picked — the client cancelled the Unit Master.
             'unit_po'                 => ['nullable', 'string', 'max:20'],
@@ -72,6 +82,7 @@ abstract class ProductRequest extends FormRequest
 
             'price_band_id'           => ['nullable', 'integer', Rule::exists('price_bands', 'id')],
             'gst_rate_id'             => ['nullable', 'integer', Rule::exists('gst_rates', 'id')],
+            'bom_id'                  => ['nullable', 'integer', Rule::exists('boms', 'id')],
 
             'fabric_length_mtr'       => ['nullable', 'numeric', 'min:0', 'max:99999.999'],
             'fabric_width_inch'       => ['nullable', 'numeric', 'min:0', 'max:99999.999'],
@@ -105,9 +116,13 @@ abstract class ProductRequest extends FormRequest
                 Rule::exists('calculation_bases', 'id'),
             ];
 
-            // Only RoSCTL is quoted as two percentages (sheet cols O and P).
-            $rules["incentives.{$scheme}.percent_2"] = in_array($scheme, ProductIncentive::TWO_PERCENT_SCHEMES, true)
+            // Only RoSCTL is quoted as two percentages and two caps.
+            $two = in_array($scheme, ProductIncentive::TWO_PERCENT_SCHEMES, true);
+            $rules["incentives.{$scheme}.percent_2"] = $two
                 ? ['nullable', 'numeric', 'min:0', 'max:100']
+                : ['prohibited'];
+            $rules["incentives.{$scheme}.cap_value_2"] = $two
+                ? ['nullable', 'numeric', 'min:0']
                 : ['prohibited'];
         }
 
@@ -135,6 +150,7 @@ abstract class ProductRequest extends FormRequest
             $attributes["incentives.{$scheme}.percent_1"]            = "{$label} %";
             $attributes["incentives.{$scheme}.percent_2"]            = "{$label} % 2";
             $attributes["incentives.{$scheme}.cap_value"]            = "{$label} cap value";
+            $attributes["incentives.{$scheme}.cap_value_2"]          = "{$label} cap value 2";
             $attributes["incentives.{$scheme}.calculation_basis_id"] = "{$label} calculated on";
         }
 
@@ -148,7 +164,7 @@ abstract class ProductRequest extends FormRequest
     {
         return [
             'item_group_code.unique' => 'This item group code is already taken.',
-            'item_group_code.max'    => 'Item group code may not be longer than 5 characters.',
+            'item_group_code.max'    => 'Item group code may not be longer than 6 characters.',
             'item_group_code.regex'  => 'Item group code may contain letters and numbers only.',
             'name.unique'            => 'A product with this name already exists.',
             'hsn_code.regex'         => 'HSN code must be 4 to 12 digits.',

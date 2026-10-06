@@ -8,6 +8,8 @@
     'categories' => [],
     // Filtered by party type; reloaded from the agents endpoint when it changes.
     'agents' => [],
+    // Agent id => {type, value} from Agent Master — commission fields are read-only.
+    'agentCommissions' => [],
     'countries' => [],
     // Change request #4 — "Default the Country to India".
     'indiaCountryId' => null,
@@ -179,18 +181,27 @@
                 GST Number <span class="req">*</span>
             </label>
             <div class="col-sm-8 col-lg-9">
+                {{-- M-15: only maxlength was ever enforced client-side, so
+                     'ABCDEFGHIJKLMNO' passed the browser's own check even
+                     though the server (see SupplierRequest) already rejects
+                     it — pattern here just surfaces that same GSTIN shape as
+                     immediate, in-browser feedback instead of a round trip. --}}
                 <input type="text" id="gst_number" name="gst_number" maxlength="15"
                        value="{{ old('gst_number', $supplier?->gst_number) }}"
                        class="form-control font-monospace text-uppercase @error('gst_number') is-invalid @enderror"
-                       placeholder="33ABCDE1234F1Z5" autocomplete="off">
+                       placeholder="33ABCDE1234F1Z5" autocomplete="off"
+                       pattern="[0-9]{2}[A-Za-z]{5}[0-9]{4}[A-Za-z][0-9A-Za-z]Z[0-9A-Za-z]"
+                       title="15-character GSTIN, e.g. 33ABCDE1234F1Z5">
                 @error('gst_number')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
                 <div class="form-text">15 characters. Contains the PAN below at positions 3–12.</div>
             </div>
         </div>
 
         {{-- Col F --}}
+        {{-- M-15: same client-side gap as GST above --}}
         <x-ui.field name="pan_number" label="PAN Number" :value="$supplier?->pan_number"
                     horizontal maxlength="10" placeholder="ABCDE1234F"
+                    pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10-character PAN, e.g. ABCDE1234F"
                     class="font-monospace text-uppercase" />
 
         {{-- Col G — "to appear to put in the msme registration details". The
@@ -521,9 +532,29 @@
                    subtitle="Where we remit their payment.">
     <div class="form-stack">
 
-        {{-- Col U --}}
-        <x-ui.field name="bank_name" label="Bank Name" :value="$supplier?->bank_name"
-                    horizontal maxlength="120" placeholder="HDFC Bank, Tiruppur" />
+        {{-- Col U — dropdown of common banks; type to add a name not in the list. --}}
+        @php
+            $bankValue = old('bank_name', $supplier?->bank_name);
+            $bankOptions = $banks ?? [];
+            if (filled($bankValue) && ! array_key_exists($bankValue, $bankOptions)) {
+                $bankOptions = [$bankValue => $bankValue] + $bankOptions;
+            }
+        @endphp
+        <div class="row form-line">
+            <label for="bank_name" class="col-sm-4 col-lg-3 col-form-label fw-semibold">Bank Name</label>
+            <div class="col-sm-8 col-lg-9">
+                <select id="bank_name" name="bank_name" data-searchable data-allow-create="true"
+                        data-placeholder="Search or type bank name…"
+                        class="form-select @error('bank_name') is-invalid @enderror">
+                    <option value="">— Select —</option>
+                    @foreach($bankOptions as $value => $label)
+                        <option value="{{ $value }}" @selected((string) $bankValue === (string) $value)>{{ $label }}</option>
+                    @endforeach
+                </select>
+                @error('bank_name')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                <div class="form-text">Pick from the list, or type a new bank name and press Enter.</div>
+            </div>
+        </div>
 
         {{-- Col V --}}
         <x-ui.field name="account_number" label="Account Number" :value="$supplier?->account_number"
@@ -531,8 +562,10 @@
                     class="font-monospace" />
 
         {{-- Col W --}}
+        {{-- M-15: same client-side gap as GST above --}}
         <x-ui.field name="ifsc_code" label="IFSC Code" :value="$supplier?->ifsc_code"
                     horizontal maxlength="11" placeholder="HDFC0001234"
+                    pattern="[A-Za-z]{4}0[A-Za-z0-9]{6}" title="11-character IFSC code, e.g. HDFC0001234"
                     class="font-monospace text-uppercase" />
 
     </div>
@@ -540,7 +573,7 @@
 
 {{-- ====================== X–Y · AGENT =========================== --}}
 <x-ui.form-section title="Agent" icon="bi-person-badge"
-                   subtitle="Optional — the list follows the party type selected above.">
+                   subtitle="Select from Agent Master only — pick the % or /pc rate from the list. No typing.">
     <div class="form-stack">
 
         {{-- Col X — "of supplier side selected in agent master should show
@@ -553,34 +586,26 @@
                      data-cascade-parent="#party_type"
                      :data-cascade-url="route('masters.suppliers.agents')"
                      data-cascade-key="party_type"
-                     :hint="count($agents) ? null : 'No agents exist on this side yet.'" />
+                     :hint="count($agents) ? 'Missing an agent? Open Agent Master and create a supplier-side agent.' : 'No agents exist on this side yet.'" />
 
-        {{-- Col Y. Type and value are separate columns so settlement maths
-             never parses a label — '2%' and '2 INR per piece' cannot both come
-             out of one text field. --}}
+        {{-- Col Y — pick a rate from Agent Master (dropdown when several). --}}
         <div class="row form-line">
-            <label for="agent_commission_value" class="col-sm-4 col-lg-3 col-form-label fw-semibold">
+            <label for="agent_commission_pick" class="col-sm-4 col-lg-3 col-form-label fw-semibold">
                 Agent Commission
             </label>
             <div class="col-sm-8 col-lg-9">
-                <div class="input-group">
-                    <input type="number" step="0.0001" min="0"
-                           id="agent_commission_value" name="agent_commission_value"
-                           value="{{ old('agent_commission_value', $supplier?->agent_commission_value) }}"
-                           class="form-control @error('agent_commission_value') is-invalid @enderror"
-                           placeholder="0.0000">
-                    <select name="agent_commission_type" style="max-width:140px"
-                            class="form-select @error('agent_commission_type') is-invalid @enderror">
-                        @foreach(['percent' => '% Percent', 'amount' => 'Fixed amount (INR)'] as $value => $text)
-                            <option value="{{ $value }}"
-                                @selected(old('agent_commission_type', $supplier?->agent_commission_type) === $value)>{{ $text }}</option>
-                        @endforeach
-                    </select>
-                </div>
+                <select id="agent_commission_pick"
+                        class="form-select @error('agent_commission_value') is-invalid @enderror @error('agent_commission_type') is-invalid @enderror">
+                    <option value="">— Select agent first —</option>
+                </select>
+                <input type="hidden" id="agent_commission_value" name="agent_commission_value"
+                       value="{{ old('agent_commission_value', $supplier?->agent_commission_value) }}">
+                <input type="hidden" id="agent_commission_type" name="agent_commission_type"
+                       value="{{ old('agent_commission_type', $supplier?->agent_commission_type) }}">
                 @error('agent_commission_value')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
                 @error('agent_commission_type')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
-                <div class="form-text">
-                    This supplier's rate for this agent. The same agent can carry a different rate for another supplier.
+                <div class="form-text" id="agent-commission-hint">
+                    Rates come from Agent Master. If an agent has more than one %, pick which one applies to this supplier.
                 </div>
             </div>
         </div>
@@ -815,6 +840,134 @@ document.addEventListener('DOMContentLoaded', function () {
                 .catch(rest);
         }, 350);
     });
+
+    /* ------------------------------------------------------------------ *
+     * Agent commission — pick a rate from Agent Master (dropdown; no typing).
+     * ------------------------------------------------------------------ */
+    const agentSelect          = document.getElementById('agent_id');
+    const commissionPick       = document.getElementById('agent_commission_pick');
+    const agentCommissionValue = document.getElementById('agent_commission_value');
+    const agentCommissionType  = document.getElementById('agent_commission_type');
+    const agentCommissionHint  = document.getElementById('agent-commission-hint');
+    const agentCommissions     = @json($agentCommissions ?? []);
+    const savedCommissionValue = agentCommissionValue?.value || '';
+    const savedCommissionType  = agentCommissionType?.value || '';
+
+    function ratesFor(agentId) {
+        if (! agentId) return [];
+        const rows = agentCommissions[agentId] ?? agentCommissions[String(agentId)] ?? [];
+        return Array.isArray(rows) ? rows : (rows ? [rows] : []);
+    }
+
+    function optionValue(row) {
+        return row.type + '|' + String(row.value);
+    }
+
+    function fillHiddenFromPick() {
+        if (! commissionPick || ! agentCommissionValue || ! agentCommissionType) return;
+        const raw = commissionPick.value || '';
+        if (! raw) {
+            agentCommissionValue.value = '';
+            agentCommissionType.value = '';
+            return;
+        }
+        const parts = raw.split('|');
+        agentCommissionType.value = parts[0] || '';
+        agentCommissionValue.value = parts.slice(1).join('|') || '';
+    }
+
+    function rebuildCommissionPick(agentId, preferType, preferValue) {
+        if (! commissionPick) return;
+
+        const rates = ratesFor(agentId);
+        commissionPick.innerHTML = '';
+
+        if (! agentId) {
+            commissionPick.appendChild(new Option('— Select agent first —', ''));
+            commissionPick.disabled = true;
+            fillHiddenFromPick();
+            if (agentCommissionHint) {
+                agentCommissionHint.textContent = 'Rates come from Agent Master. If an agent has more than one %, pick which one applies to this supplier.';
+            }
+            return;
+        }
+
+        if (rates.length === 0) {
+            commissionPick.appendChild(new Option('— No rate on this agent —', ''));
+            commissionPick.disabled = true;
+            agentCommissionValue.value = '';
+            agentCommissionType.value = '';
+            if (agentCommissionHint) {
+                agentCommissionHint.innerHTML = 'This agent has <strong>no % / pc rate</strong> in Agent Master (common for <strong>Supplier pays</strong>). Add a commission entry on the agent if needed.';
+            }
+            return;
+        }
+
+        commissionPick.disabled = false;
+        if (rates.length > 1) {
+            commissionPick.appendChild(new Option('— Select rate —', ''));
+        }
+
+        let matched = '';
+        rates.forEach(function (row) {
+            const value = optionValue(row);
+            commissionPick.appendChild(new Option(row.label, value));
+            if (preferType && preferValue !== '' && preferValue !== null
+                && row.type === preferType
+                && Number(row.value) === Number(preferValue)) {
+                matched = value;
+            }
+        });
+
+        if (matched) {
+            commissionPick.value = matched;
+        } else if (rates.length === 1) {
+            commissionPick.value = optionValue(rates[0]);
+        } else {
+            commissionPick.value = '';
+        }
+
+        fillHiddenFromPick();
+
+        if (agentCommissionHint) {
+            agentCommissionHint.textContent = rates.length > 1
+                ? 'This agent has more than one rate — pick which % or /pc applies to this supplier.'
+                : 'Taken from Agent Master for this agent.';
+        }
+    }
+
+    function onAgentChanged(agentId) {
+        rebuildCommissionPick(agentId, null, null);
+    }
+
+    function bindAgentCommission() {
+        if (! agentSelect) return;
+
+        if (! agentSelect.dataset.commissionNativeBound) {
+            agentSelect.dataset.commissionNativeBound = '1';
+            agentSelect.addEventListener('change', function () {
+                onAgentChanged(agentSelect.value);
+            });
+        }
+
+        function attachTomSelect() {
+            if (! agentSelect.tomselect || agentSelect.dataset.commissionTsBound) return;
+            agentSelect.dataset.commissionTsBound = '1';
+            agentSelect.tomselect.on('change', function (value) {
+                onAgentChanged(value);
+            });
+        }
+
+        attachTomSelect();
+        setTimeout(attachTomSelect, 50);
+
+        commissionPick?.addEventListener('change', fillHiddenFromPick);
+
+        // Edit / validation old(): keep saved rate selected when possible.
+        rebuildCommissionPick(agentSelect.value, savedCommissionType, savedCommissionValue);
+    }
+
+    bindAgentCommission();
 });
 </script>
 @endpush

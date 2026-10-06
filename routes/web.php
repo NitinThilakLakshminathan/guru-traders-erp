@@ -10,12 +10,20 @@ use App\Http\Controllers\Masters\JobberController;
 use App\Http\Controllers\Masters\MarkupController;
 use App\Http\Controllers\Masters\ProductController;
 use App\Http\Controllers\Masters\SupplierController;
+use App\Http\Controllers\Masters\BomController;
+use App\Http\Controllers\Masters\TrimAccessoryController;
 use App\Http\Controllers\Administration\CompanyProfileController;
 use App\Http\Controllers\Export\ExportDocumentChecklistController;
 use App\Http\Controllers\Export\ExportDocumentController;
 use App\Http\Controllers\Export\ExportDocumentOcrController;
 use App\Http\Controllers\Export\PackingController;
 use App\Http\Controllers\Finance\FinanceController;
+use App\Http\Controllers\Finance\BillingController;
+use App\Http\Controllers\Finance\FinanceTrackerController;
+use App\Http\Controllers\Finance\VoucherController;
+use App\Http\Controllers\Finance\BudgetController;
+use App\Http\Controllers\Finance\PayrollController;
+use App\Http\Controllers\Finance\GstFilingController;
 use App\Http\Controllers\Procurement\InwardEntryController;
 use App\Http\Controllers\Procurement\PurchaseOrderController;
 use App\Http\Controllers\ProfileController;
@@ -24,10 +32,18 @@ use App\Http\Controllers\Sales\InquiryController;
 use App\Http\Controllers\Sales\OrderConfirmationController;
 use App\Http\Controllers\UserManagement\PermissionController;
 use App\Http\Controllers\UserManagement\RoleController;
+use App\Http\Controllers\UserManagement\UserController;
 use App\Http\Controllers\DashboardController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', fn () => view('welcome'));
+// H-01: bare '/' (or '/guru-traders/' behind the subpath proxy) used to
+// 405 in production because no GET handler existed there at all once the
+// route cache went stale — this is the "first impression" URL anyone
+// hitting the base domain lands on, so it needs to always resolve to
+// something real rather than depend on a view nobody maintains.
+Route::get('/', fn () => auth()->check()
+    ? redirect()->route('dashboard')
+    : redirect()->route('login'));
 
 Route::get('/dashboard', [DashboardController::class, 'index'])
     ->middleware(['auth', 'verified'])
@@ -65,6 +81,8 @@ Route::middleware('auth')->group(function () {
          */
         Route::get('geo/states', [GeoController::class, 'states'])->name('geo.states');
         Route::get('geo/cities', [GeoController::class, 'cities'])->name('geo.cities');
+        Route::post('geo/states', [GeoController::class, 'storeState'])->name('geo.states.store');
+        Route::post('geo/cities', [GeoController::class, 'storeCity'])->name('geo.cities.store');
 
         Route::patch('categories/{category}/toggle-status', [CategoryController::class, 'toggleStatus'])
             ->name('categories.toggle-status');
@@ -80,6 +98,10 @@ Route::middleware('auth')->group(function () {
         // col K: "different rates with option to add in the future".
         Route::post('products/gst-rates', [ProductController::class, 'storeGstRate'])
             ->name('products.gst-rates.store');
+        Route::post('products/units', [ProductController::class, 'storeUnit'])
+            ->name('products.units.store');
+        Route::get('products/{product}/duplicate', [ProductController::class, 'duplicate'])
+            ->name('products.duplicate');
         Route::resource('products', ProductController::class);
 
         // Same ordering rule as products — before the resource, or
@@ -93,6 +115,8 @@ Route::middleware('auth')->group(function () {
         // Same quick-add, for the contact's Designation field.
         Route::post('buyers/designations', [BuyerController::class, 'storeDesignation'])
             ->name('buyers.designations.store');
+        Route::post('buyers/shipment-methods', [BuyerController::class, 'storeShipmentMethod'])
+            ->name('buyers.shipment-methods.store');
         Route::resource('buyers', BuyerController::class);
 
         /*
@@ -131,6 +155,14 @@ Route::middleware('auth')->group(function () {
         Route::patch('fob-values/{fobValue}/toggle-status', [FobValueController::class, 'toggleStatus'])
             ->name('fob-values.toggle-status');
         Route::resource('fob-values', FobValueController::class);
+
+        Route::patch('trim-accessories/{trimAccessory}/toggle-status', [TrimAccessoryController::class, 'toggleStatus'])
+            ->name('trim-accessories.toggle-status');
+        Route::resource('trim-accessories', TrimAccessoryController::class);
+
+        Route::patch('boms/{bom}/toggle-status', [BomController::class, 'toggleStatus'])
+            ->name('boms.toggle-status');
+        Route::resource('boms', BomController::class);
 
         /*
          * Order Formats. Bound as {format} rather than {documentFormat} — the
@@ -175,6 +207,16 @@ Route::middleware('auth')->group(function () {
             ->name('inquiries.products');
         Route::get('inquiries/suppliers', [InquiryController::class, 'suppliers'])
             ->name('inquiries.suppliers');
+        Route::get('inquiries/quote-fob', [InquiryController::class, 'quoteFob'])
+            ->name('inquiries.quote-fob');
+        // Cross-inquiry follow-up report: every dated follow-up comment across
+        // every inquiry, groupable by date and filterable by Category — a
+        // read view over the same inquiry_follow_ups rows the per-inquiry
+        // "Buyer Follow-up" panel already shows. Must be registered ahead of
+        // Route::resource('inquiries', ...) below, otherwise its GET
+        // inquiries/{inquiry} show route would swallow "follow-ups" as an id.
+        Route::get('inquiries/follow-ups', [InquiryController::class, 'followUps'])
+            ->name('inquiries.follow-ups');
         // Quick-add for the Source field — same shape as the Buyer form's
         // designations/payment-terms quick-add routes.
         Route::post('inquiries/sources', [InquiryController::class, 'storeSource'])
@@ -212,6 +254,12 @@ Route::middleware('auth')->group(function () {
     Route::prefix('procurement')->name('procurement.')->group(function () {
         Route::resource('purchase-orders', PurchaseOrderController::class)
             ->parameters(['purchase-orders' => 'purchaseOrder']);
+        Route::get('purchase-orders/{purchaseOrder}/reply-form.pdf', [PurchaseOrderController::class, 'replyFormPdf'])
+            ->name('purchase-orders.reply-form');
+        Route::post('purchase-orders/{purchaseOrder}/ocr-extract', [PurchaseOrderController::class, 'ocrExtract'])
+            ->name('purchase-orders.ocr-extract');
+        Route::post('purchase-orders/{purchaseOrder}/ocr-apply', [PurchaseOrderController::class, 'ocrApply'])
+            ->name('purchase-orders.ocr-apply');
 
         Route::get('inward-entries/po-details/{purchaseOrder}', [InwardEntryController::class, 'poDetails'])
             ->name('inward-entries.po-details');
@@ -233,9 +281,27 @@ Route::middleware('auth')->group(function () {
         Route::get('packing', [PackingController::class, 'index'])
             ->middleware('permission:packing.view')
             ->name('packing.index');
+        Route::get('packing/template.xlsx', [PackingController::class, 'templateExcel'])
+            ->middleware('permission:packing.view')
+            ->name('packing.template-excel');
+        Route::get('packing/template.pdf', [PackingController::class, 'templatePdf'])
+            ->middleware('permission:packing.view')
+            ->name('packing.template-pdf');
         Route::get('packing/{document}', [PackingController::class, 'show'])
             ->middleware('permission:packing.view')
             ->name('packing.show');
+        Route::get('packing/{document}/template.xlsx', [PackingController::class, 'templateExcelForDocument'])
+            ->middleware('permission:packing.view')
+            ->name('packing.template-excel-document');
+        Route::get('packing/{document}/template.pdf', [PackingController::class, 'templatePdfForDocument'])
+            ->middleware('permission:packing.view')
+            ->name('packing.template-pdf-document');
+        Route::post('packing/{document}/import-preview', [PackingController::class, 'importPreview'])
+            ->middleware('permission:export-document.edit')
+            ->name('packing.import-preview');
+        Route::post('packing/{document}/import-apply', [PackingController::class, 'importApply'])
+            ->middleware('permission:export-document.edit')
+            ->name('packing.import-apply');
 
         Route::get('ocr', [ExportDocumentOcrController::class, 'index'])->name('ocr.index');
         Route::post('ocr/extract', [ExportDocumentOcrController::class, 'extract'])->name('ocr.extract');
@@ -279,6 +345,40 @@ Route::middleware('auth')->group(function () {
     });
 
     Route::prefix('finance')->name('finance.')->group(function () {
+        // Billing & Invoices
+        Route::get('billing', [BillingController::class, 'index'])->middleware('permission:billing.view')->name('billing.index');
+        Route::post('billing', [BillingController::class, 'store'])->middleware('permission:billing.create')->name('billing.store');
+        Route::post('billing/{billing}/pay', [BillingController::class, 'recordPayment'])->middleware('permission:billing.edit')->name('billing.pay');
+        Route::delete('billing/{billing}', [BillingController::class, 'destroy'])->middleware('permission:billing.delete')->name('billing.destroy');
+
+        // Finance Tracker
+        Route::get('tracker', [FinanceTrackerController::class, 'index'])->middleware('permission:finance-tracker.view')->name('tracker.index');
+        Route::post('tracker', [FinanceTrackerController::class, 'storeTransaction'])->middleware('permission:finance-tracker.create')->name('tracker.store');
+        Route::delete('tracker/{transaction}', [FinanceTrackerController::class, 'destroyTransaction'])->middleware('permission:finance-tracker.delete')->name('tracker.destroy');
+
+        // Vouchers
+        Route::get('vouchers', [VoucherController::class, 'index'])->middleware('permission:voucher.view')->name('vouchers.index');
+        Route::post('vouchers', [VoucherController::class, 'store'])->middleware('permission:voucher.create')->name('vouchers.store');
+        Route::post('vouchers/{voucher}/approve', [VoucherController::class, 'approve'])->middleware('permission:voucher.approve')->name('vouchers.approve');
+        Route::post('vouchers/{voucher}/reject', [VoucherController::class, 'reject'])->middleware('permission:voucher.approve')->name('vouchers.reject');
+        Route::delete('vouchers/{voucher}', [VoucherController::class, 'destroy'])->middleware('permission:voucher.delete')->name('vouchers.destroy');
+        Route::post('vouchers/{id}/restore', [VoucherController::class, 'restore'])->middleware('permission:voucher.delete')->name('vouchers.restore');
+
+        // Budget Planner
+        Route::get('budget', [BudgetController::class, 'index'])->middleware('permission:budget.view')->name('budget.index');
+        Route::post('budget', [BudgetController::class, 'storeTarget'])->middleware('permission:budget.create')->name('budget.store');
+
+        // Payroll & Salary
+        Route::get('payroll', [PayrollController::class, 'index'])->middleware('permission:payroll.view')->name('payroll.index');
+        Route::post('payroll/process', [PayrollController::class, 'process'])->middleware('permission:payroll.process')->name('payroll.process');
+        Route::put('payroll/{payroll}', [PayrollController::class, 'update'])->middleware('permission:payroll.edit')->name('payroll.update');
+        Route::delete('payroll/{payroll}', [PayrollController::class, 'destroy'])->middleware('permission:payroll.delete')->name('payroll.destroy');
+
+        // GST Filings
+        Route::get('gst', [GstFilingController::class, 'index'])->middleware('permission:gst-filing.view')->name('gst.index');
+        Route::put('gst/{gst}', [GstFilingController::class, 'updateStatus'])->middleware('permission:gst-filing.edit')->name('gst.update');
+
+        // Existing Finance Views
         Route::get('purchase-bills', [FinanceController::class, 'purchaseBills'])
             ->middleware('permission:purchase-bill.view')
             ->name('purchase-bills.index');

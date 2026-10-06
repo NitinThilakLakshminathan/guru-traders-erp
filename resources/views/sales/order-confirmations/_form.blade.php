@@ -41,6 +41,11 @@
             'allow_multiple_colours' => (bool) $f->allow_multiple_colours,
             'delivery_details'       => $f->delivery_details,
             'packing_details'        => $f->packing_details,
+            'reference_images'       => $f->images->map(fn ($img) => [
+                'url'     => $img->url,
+                'caption' => $img->caption,
+                'name'    => $img->original_name,
+            ])->values(),
             'units'                  => $f->units->pluck('name'),
             'categories'             => $f->categories->pluck('id'),
             'columns'                => $standardColumns,
@@ -54,9 +59,14 @@
     <div class="row">
         <div class="col-md-3 mb-3">
             <label class="form-label fw-semibold">Contract No.</label>
+            {{-- M-10: the numbering pattern used to sit inside the readonly
+                 input's own value on a fresh OC (e.g. "GT/[buyer code]/[seq]/
+                 [FY]"), which is wider than the field at a normal 1024px
+                 width and just clips mid-placeholder — moved below as a
+                 hint instead, same as every other field's numbering note. --}}
             <input type="text" class="form-control bg-body-tertiary" readonly
-                   value="{{ $isEdit ? $orderConfirmation->oc_num : 'GT/[buyer code]/[seq]/[FY]' }}">
-            <div class="form-text">Global running sequence</div>
+                   value="{{ $isEdit ? $orderConfirmation->oc_num : 'Auto-generated on save' }}">
+            <div class="form-text">Global running sequence · format GT/[buyer code]/[seq]/[FY]</div>
         </div>
 
         <x-ui.select name="mode" label="Type" required col="col-md-3"
@@ -91,7 +101,10 @@
         <x-ui.select name="agent_id" label="Agent" col="col-md-3"
                      :options="$agents" :selected="$val('agent_id')" hint="Buyer Master" />
 
-        <x-ui.select name="agent_commission_type" label="Commission Type" col="col-md-2"
+        {{-- M-10: was col-md-2 — too narrow at a normal 1024px width for even
+             the placeholder text ("— Select —" showed as "— Sele"), let
+             alone "Percent" / "Flat" once chosen. --}}
+        <x-ui.select name="agent_commission_type" label="Commission Type" col="col-md-3"
                      :options="['percent' => 'Percent', 'flat' => 'Flat']" :selected="$val('agent_commission_type')" />
 
         <x-ui.field name="agent_commission_value" label="Commission" type="number" col="col-md-2"
@@ -208,21 +221,13 @@
                 </button>
                 <div class="costing-panel d-none mt-2 border-top pt-2">
                     <div class="row g-2 mb-2">
-                        <div class="col-md-3">
-                            <label class="form-label small">FOB Value</label>
-                            <select class="form-select form-select-sm js-field" data-field="fob_value_id">
-                                <option value="">— Select —</option>
-                                @foreach($fobValues as $id => $name)
-                                    <option value="{{ $id }}" @selected((string) $iFob === (string) $id)>{{ $name }}</option>
-                                @endforeach
-                            </select>
-                        </div>
-                        <div class="col-md-3">
+                        <input type="hidden" class="js-field" data-field="fob_value_id" value="{{ $iFob }}">
+                        <div class="col-md-4">
                             <label class="form-label small">Cost Price / Unit (₹)</label>
                             <input type="number" step="0.01" min="0" class="form-control form-control-sm js-field" data-field="cost_price" value="{{ $iCostPrice }}">
                             <div class="form-text">Internal — feeds Purchase Order</div>
                         </div>
-                        <div class="col-md-6">
+                        <div class="col-md-8">
                             <label class="form-label small">Item Remarks</label>
                             <input type="text" class="form-control form-control-sm js-field" data-field="remarks" maxlength="500" value="{{ $iRemarks }}">
                         </div>
@@ -278,7 +283,7 @@
 </x-ui.form-section>
 
 <x-ui.form-section title="Delivery & Packing Details" icon="bi-box-seam"
-                   subtitle="Pre-fills from Order Format · editable per OC · carries to PO.">
+                   subtitle="Pre-fills from Order Format · editable per OC · carries to PO. Reference images come from the format (print defaults).">
     <div class="row">
         <x-ui.textarea name="delivery_details" label="Delivery Details" required col="col-12"
                        rows="3" :value="$val('delivery_details')" />
@@ -286,6 +291,12 @@
     <div class="row">
         <x-ui.textarea name="packing_details" label="Packing Details" required col="col-12"
                        rows="3" :value="$val('packing_details')" />
+    </div>
+    <div class="mt-2">
+        <label class="form-label fw-semibold">Format reference images</label>
+        <div id="format-reference-images" class="d-flex flex-wrap gap-3 text-body-secondary small">
+            Pick an Order Format to load its packing / marking reference images.
+        </div>
     </div>
 </x-ui.form-section>
 
@@ -581,7 +592,37 @@ document.addEventListener('DOMContentLoaded', function () {
             if (! deliveryEl.value.trim()) deliveryEl.value = meta.delivery_details || '';
             if (! packingEl.value.trim()) packingEl.value = meta.packing_details || '';
         }
+        renderFormatReferenceImages(meta);
     });
+
+    function renderFormatReferenceImages(meta) {
+        const host = document.getElementById('format-reference-images');
+        if (! host) return;
+        const images = meta?.reference_images || [];
+        if (! images.length) {
+            host.className = 'd-flex flex-wrap gap-3 text-body-secondary small';
+            host.textContent = meta
+                ? 'This format has no reference images yet.'
+                : 'Pick an Order Format to load its packing / marking reference images.';
+            return;
+        }
+        host.className = 'd-flex flex-wrap gap-3';
+        host.innerHTML = '';
+        images.forEach(function (image) {
+            const card = document.createElement('div');
+            card.className = 'reference-image';
+            const img = document.createElement('img');
+            img.src = image.url;
+            img.alt = image.name || '';
+            const caption = document.createElement('div');
+            caption.className = 'reference-image-caption text-body-secondary';
+            caption.textContent = image.caption || image.name || '';
+            card.append(img, caption);
+            host.append(card);
+        });
+    }
+
+    renderFormatReferenceImages(formats[formatSelect.value]);
 
     /* ------------------------- Direct vs OC mode ------------------------- */
 
@@ -830,21 +871,13 @@ document.addEventListener('DOMContentLoaded', function () {
         </button>
         <div class="costing-panel d-none mt-2 border-top pt-2">
             <div class="row g-2 mb-2">
-                <div class="col-md-3">
-                    <label class="form-label small">FOB Value</label>
-                    <select class="form-select form-select-sm js-field" data-field="fob_value_id">
-                        <option value="">— Select —</option>
-                        @foreach($fobValues as $id => $name)
-                            <option value="{{ $id }}">{{ $name }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="col-md-3">
+                <input type="hidden" class="js-field" data-field="fob_value_id">
+                <div class="col-md-4">
                     <label class="form-label small">Cost Price / Unit (₹)</label>
                     <input type="number" step="0.01" min="0" class="form-control form-control-sm js-field" data-field="cost_price">
                     <div class="form-text">Internal — feeds Purchase Order</div>
                 </div>
-                <div class="col-md-6">
+                <div class="col-md-8">
                     <label class="form-label small">Item Remarks</label>
                     <input type="text" class="form-control form-control-sm js-field" data-field="remarks" maxlength="500">
                 </div>

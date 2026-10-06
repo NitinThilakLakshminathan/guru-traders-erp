@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Masters;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Masters\StoreProductRequest;
 use App\Http\Requests\Masters\UpdateProductRequest;
+use App\Models\Bom;
 use App\Models\CalculationBasis;
 use App\Models\Category;
 use App\Models\DocumentFormatUnit;
@@ -32,11 +33,11 @@ class ProductController extends Controller implements HasMiddleware
     {
         return [
             new Middleware('permission:product.view', only: ['index', 'show', 'checkCode']),
-            new Middleware('permission:product.create', only: ['create', 'store']),
+            new Middleware('permission:product.create', only: ['create', 'store', 'duplicate']),
             new Middleware('permission:product.edit', only: ['edit', 'update', 'toggleStatus']),
             new Middleware('permission:product.delete', only: ['destroy']),
             // Reachable from either the create or the edit form.
-            new Middleware('permission:product.create|product.edit', only: ['storeGstRate']),
+            new Middleware('permission:product.create|product.edit', only: ['storeGstRate', 'storeUnit']),
         ];
     }
 
@@ -48,19 +49,43 @@ class ProductController extends Controller implements HasMiddleware
             ->search($request->string('search')->toString())
             ->status($request->string('status')->toString())
             ->sort($request->string('sort')->toString(), $request->string('direction')->toString())
-            ->paginate(10)
+            ->paginate($this->perPage($request))
             ->withQueryString();
 
         return view('masters.products.index', [
             'products'   => $products,
             'categories' => Category::active()->orderBy('name')->pluck('name', 'id'),
-            'filters'    => $request->only('search', 'status', 'category_id', 'sort', 'direction'),
+            'filters'    => $request->only('search', 'status', 'category_id', 'sort', 'direction', 'per_page'),
         ]);
     }
 
     public function create(): View
     {
-        return view('masters.products.create', $this->formData());
+        return view('masters.products.create', $this->formData() + [
+            'product' => null,
+            'isDuplicate' => false,
+        ]);
+    }
+
+    /**
+     * Open Add Product pre-filled from an existing row — client: often only
+     * price band / GST change. Unique item code must be typed fresh.
+     */
+    public function duplicate(Product $product): View
+    {
+        $product->load(['incentives', 'bomItems', 'bom.lines']);
+
+        $draft = $product->replicate();
+        $draft->item_group_code = null;
+        $draft->name = $product->name.' (Copy)';
+        $draft->setRelation('incentives', $product->incentives);
+        $draft->setRelation('bomItems', $product->bomItems);
+        $draft->setRelation('bom', $product->bom);
+
+        return view('masters.products.create', $this->formData($product) + [
+            'product' => $draft,
+            'isDuplicate' => true,
+        ]);
     }
 
     public function store(StoreProductRequest $request): RedirectResponse
@@ -77,7 +102,7 @@ class ProductController extends Controller implements HasMiddleware
         return view('masters.products.show', [
             'product' => $product->load([
                 'category', 'priceBand', 'gstRate',
-                'incentives.calculationBasis', 'bomItems', 'creator', 'updater',
+                'incentives.calculationBasis', 'bom.lines', 'bomItems', 'creator', 'updater',
             ]),
         ]);
     }
@@ -85,7 +110,7 @@ class ProductController extends Controller implements HasMiddleware
     public function edit(Product $product): View
     {
         return view('masters.products.edit', $this->formData($product) + [
-            'product' => $product->load(['incentives', 'bomItems']),
+            'product' => $product->load(['incentives', 'bomItems', 'bom.lines']),
         ]);
     }
 
@@ -181,6 +206,39 @@ class ProductController extends Controller implements HasMiddleware
     }
 
     /**
+     * Quick-add a unit from the Product form — same "add more in the future"
+     * pattern as GST. Attaches the name to every active Order Format so the
+     * shared unit list (DocumentFormatUnit) stays the single source.
+     */
+    public function storeUnit(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:20', 'regex:/^[A-Za-z0-9 .\\/-]+$/'],
+        ]);
+
+        $name = strtoupper(trim($data['name']));
+
+        $formats = \App\Models\DocumentFormat::query()
+            ->where('status', 'active')
+            ->get();
+
+        if ($formats->isEmpty()) {
+            // No format yet — still return the typed value so the product can
+            // save it; unitOptions() already keeps product-owned values.
+            return response()->json(['id' => $name, 'name' => $name]);
+        }
+
+        foreach ($formats as $format) {
+            $format->units()->firstOrCreate(
+                ['name' => $name],
+                ['sort_order' => ((int) $format->units()->max('sort_order')) + 1],
+            );
+        }
+
+        return response()->json(['id' => $name, 'name' => $name]);
+    }
+
+    /**
      * Dropdown sources shared by the create and edit forms.
      *
      * Only active rows: a retired unit or GST rate must not be selectable on a
@@ -228,6 +286,13 @@ class ProductController extends Controller implements HasMiddleware
             'priceBands'        => $priceBandsQuery->orderBy('code')->get()->pluck('label', 'id'),
             'gstRates'          => $gstRatesQuery->orderBy('rate')->get()->pluck('label', 'id'),
             'calculationBases'  => CalculationBasis::active()->orderBy('name')->pluck('name', 'id'),
+            'boms'              => Bom::query()
+                ->when($product?->bom_id, fn ($q) => $q->where(function ($inner) use ($product) {
+                    $inner->active()->orWhere('id', $product->bom_id);
+                }), fn ($q) => $q->active())
+                ->with('lines')
+                ->orderBy('name')
+                ->get(),
         ];
     }
 
@@ -252,5 +317,17 @@ class ProductController extends Controller implements HasMiddleware
 
         return $units->filter()->unique()->sort()->values()
             ->mapWithKeys(fn ($unit) => [$unit => $unit])->all();
+    }
+
+    /**
+     * L-01: 589 products at 10/page is 59 clicks. 25/50/100, remembered in
+     * the query string so Filter/Reset keep the chosen size.
+     */
+    private function perPage(Request $request): int
+    {
+        $allowed = [25, 50, 100];
+        $value = $request->integer('per_page', 25);
+
+        return in_array($value, $allowed, true) ? $value : 25;
     }
 }

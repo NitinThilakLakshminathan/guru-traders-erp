@@ -2,23 +2,35 @@
 
 namespace App\Services\Procurement;
 
+use App\Models\NumberSeries;
 use App\Models\PurchaseOrder;
+use App\Services\NumberSeriesService;
+use App\Support\FinancialYear;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class PurchaseOrderService
 {
+    public function __construct(private readonly NumberSeriesService $numbers)
+    {
+    }
+
     /**
      * @param  array<string, mixed>  $data
      */
     public function create(array $data): PurchaseOrder
     {
         return DB::transaction(function () use ($data) {
-            $po = PurchaseOrder::create($this->headerData($data));
+            // `po_num` is not fillable — assign like OC-raised POs (GT/PO/{seq}/{FY}).
+            $po = new PurchaseOrder($this->headerData($data));
+            $this->assignPoNumber($po);
+            $po->save();
 
             $this->syncItems($po, $data['items'] ?? []);
             $this->syncTimeline($po, $data['timeline'] ?? []);
 
-            return $po;
+            return $po->refresh();
         });
     }
 
@@ -35,6 +47,25 @@ class PurchaseOrderService
 
             return $po->refresh();
         });
+    }
+
+    /**
+     * `GT/PO/{seq}/{FY}` — same layout OrderConfirmationService uses when
+     * raising POs from an OC.
+     */
+    private function assignPoNumber(PurchaseOrder $po): void
+    {
+        $financialYear = FinancialYear::current();
+
+        NumberSeries::firstOrCreate(
+            ['module' => 'po', 'financial_year' => $financialYear],
+            ['prefix' => '', 'padding' => 3, 'current_number' => 0, 'reset_yearly' => true]
+        );
+
+        $number = $this->numbers->nextNumber('po', $financialYear);
+
+        $po->po_num = "GT/PO/{$number}/{$financialYear}";
+        $po->financial_year = $financialYear;
     }
 
     /**
@@ -57,9 +88,17 @@ class PurchaseOrderService
      */
     private function syncItems(PurchaseOrder $po, array $items): void
     {
+        $previousPaths = $po->items()->pluck('image_path')->filter()->all();
+        $keptPaths = [];
+
         $po->items()->delete();
 
         foreach (array_values($items) as $index => $itemData) {
+            $imagePath = $this->resolveItemImage($itemData);
+            if ($imagePath) {
+                $keptPaths[] = $imagePath;
+            }
+
             $item = $po->items()->create([
                 'order_confirmation_item_id' => $itemData['order_confirmation_item_id'] ?? null,
                 'sort_order'                 => $index,
@@ -69,6 +108,7 @@ class PurchaseOrderService
                 'unit'                        => $itemData['unit'] ?? null,
                 'cost_price'                  => $itemData['cost_price'] ?? null,
                 'remarks'                     => $itemData['remarks'] ?? null,
+                'image_path'                  => $imagePath,
                 'custom_values'               => array_filter((array) ($itemData['custom'] ?? []), fn ($v) => filled($v)) ?: null,
             ]);
 
@@ -103,6 +143,25 @@ class PurchaseOrderService
                 'amount' => round($qty * (float) ($itemData['cost_price'] ?? 0), 2),
             ]);
         }
+
+        foreach (array_diff($previousPaths, $keptPaths) as $stale) {
+            Storage::disk('public')->delete($stale);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $itemData
+     */
+    private function resolveItemImage(array $itemData): ?string
+    {
+        $upload = $itemData['image'] ?? null;
+        if ($upload instanceof UploadedFile) {
+            return $upload->store('purchase-order-items', 'public');
+        }
+
+        $existing = $itemData['existing_image_path'] ?? null;
+
+        return filled($existing) ? (string) $existing : null;
     }
 
     /**

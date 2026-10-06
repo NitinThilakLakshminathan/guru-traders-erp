@@ -32,6 +32,13 @@ window.upgradeSearchableSelect = function (el) {
         allowEmptyOption: true,
         maxOptions: null,
         placeholder: el.dataset.placeholder || 'Search…',
+        // Renders the dropdown panel on <body> instead of right next to the
+        // <select> in the DOM. Without this, a select sitting inside any
+        // scrolling/clipping container (the Inquiry item table's sideways
+        // scroll, a modal, a narrow column) gets its open panel squashed or
+        // cut off by that ancestor's overflow instead of floating cleanly
+        // above the page. tom-select repositions it on scroll/resize itself.
+        dropdownParent: 'body',
     };
 
     // Multi-select (Buyer sheet col D, "allow multiple selection") needs
@@ -40,12 +47,32 @@ window.upgradeSearchableSelect = function (el) {
         settings.plugins = ['remove_button'];
     }
 
+    // Free-text create with no server round-trip (e.g. bank names): type a
+    // value that is not in the list and it becomes an option on blur/enter.
+    if (el.dataset.allowCreate === 'true' && ! el.dataset.createUrl) {
+        settings.create = true;
+        settings.createOnBlur = true;
+    }
+
     // "Drop down, add more in the future" (Buyer sheet col Q, Payment
     // Terms): typing a name not already in the list posts it to
     // data-create-url and adds the row it comes back with.
+    // Cascading geo fields also send the parent id (country_id / state_id)
+    // from data-cascade-parent + data-cascade-key so a typed Estonia state
+    // lands under the right country.
     if (el.dataset.createUrl) {
         settings.create = function (input, callback) {
             const token = document.querySelector('meta[name="csrf-token"]')?.content;
+            const body = { name: input };
+
+            if (el.dataset.cascadeParent && el.dataset.cascadeKey) {
+                const parent = document.querySelector(el.dataset.cascadeParent);
+                if (! parent?.value) {
+                    callback();
+                    return;
+                }
+                body[el.dataset.cascadeKey] = parent.value;
+            }
 
             fetch(el.dataset.createUrl, {
                 method: 'POST',
@@ -54,7 +81,7 @@ window.upgradeSearchableSelect = function (el) {
                     Accept: 'application/json',
                     'X-CSRF-TOKEN': token || '',
                 },
-                body: JSON.stringify({ name: input }),
+                body: JSON.stringify(body),
             })
                 .then((r) => (r.ok ? r.json() : Promise.reject()))
                 .then((row) => callback({ value: String(row.id), text: row.name }))
@@ -114,85 +141,134 @@ document.addEventListener('DOMContentLoaded', () => {
  */
 function initCascadingSelects() {
     const children = document.querySelectorAll('select[data-cascade-parent]');
-    if (!children.length) return;
+    if (! children.length) return;
+
+    const inflight = new WeakMap();
 
     children.forEach((child) => {
         const parent = document.querySelector(child.dataset.cascadeParent);
-        if (!parent) return;
+        if (! parent) return;
 
-        // A child whose parent is empty starts disabled — an open dropdown
-        // listing every city in the world is worse than one that says why it
-        // is empty.
-        applyEnabledState(child, parent.value);
+        applyEnabledState(child, parentValue(parent));
 
-        parent.addEventListener('change', () => reload(child, parent.value));
+        // Bind ONE change source. TomSelect fires both its own "change" and a
+        // native change; listening to both cleared the city list mid-fetch.
+        if (parent.tomselect) {
+            parent.tomselect.on('change', (value) => reload(child, value || ''));
+        } else {
+            parent.addEventListener('change', () => reload(child, parentValue(parent)));
+        }
     });
 
+    function parentValue(select) {
+        return select.tomselect ? String(select.tomselect.getValue() || '') : String(select.value || '');
+    }
+
     function control(select) {
-        // TomSelect hangs its instance off the element it replaced.
         return select.tomselect || null;
     }
 
-    function applyEnabledState(select, parentValue) {
+    function applyEnabledState(select, value) {
         const ts = control(select);
-        const enabled = Boolean(parentValue);
+        const enabled = Boolean(value);
         const placeholder = enabled
             ? (select.dataset.placeholder || 'Search…')
             : (select.dataset.cascadeEmpty || 'Select the field above first');
 
-        select.disabled = !enabled;
+        select.disabled = ! enabled;
 
         if (ts) {
             enabled ? ts.enable() : ts.disable();
             ts.settings.placeholder = placeholder;
-            ts.control_input.placeholder = placeholder;
+            if (ts.control_input) {
+                ts.control_input.placeholder = placeholder;
+            }
         }
     }
 
-    /**
-     * Repopulate one select from its endpoint, then cascade the reset downward.
-     *
-     * The child is cleared before the request rather than after it: leaving a
-     * stale city visible while its new list loads is how a buyer ends up saved
-     * in a city that is not in the country on screen.
-     */
-    function reload(select, parentValue) {
+    function reload(select, value) {
         const ts = control(select);
+        const parentVal = String(value || '');
 
-        if (ts) { ts.clear(true); ts.clearOptions(); } else { select.innerHTML = ''; }
+        // Cancel any previous fetch for this select so a slow response cannot
+        // overwrite a newer country/state choice.
+        const previous = inflight.get(select);
+        if (previous) {
+            previous.abort();
+        }
 
-        applyEnabledState(select, parentValue);
+        if (ts) {
+            ts.clear(true);
+            ts.clearOptions();
+        } else {
+            select.innerHTML = '';
+        }
+
+        applyEnabledState(select, parentVal);
         resetDescendants(select);
 
-        if (!parentValue) return;
+        if (! parentVal) {
+            return;
+        }
 
-        const url = new URL(select.dataset.cascadeUrl, window.location.origin);
-        url.searchParams.set(select.dataset.cascadeKey, parentValue);
+        const url = new URL(select.dataset.cascadeUrl, window.location.href);
+        url.searchParams.set(select.dataset.cascadeKey, parentVal);
 
-        if (ts) ts.load(() => { });
+        const controller = new AbortController();
+        inflight.set(select, controller);
 
-        fetch(url, { headers: { Accept: 'application/json' } })
+        fetch(url.toString(), {
+            headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+            signal: controller.signal,
+        })
             .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
             .then((rows) => {
+                if (! Array.isArray(rows)) {
+                    rows = [];
+                }
+
+                const placeholder = rows.length
+                    ? (select.dataset.placeholder || 'Search…')
+                    : 'No options for this selection';
+
                 if (ts) {
+                    if (ts.settings.allowEmptyOption) {
+                        ts.addOption({ value: '', text: placeholder });
+                    }
                     ts.addOptions(rows.map((row) => ({ value: String(row.id), text: row.name })));
+                    ts.settings.placeholder = placeholder;
+                    if (ts.control_input) {
+                        ts.control_input.placeholder = placeholder;
+                    }
                     ts.refreshOptions(false);
                 } else {
-                    select.append(new Option(select.dataset.placeholder || '— Select —', ''));
+                    select.append(new Option(placeholder, ''));
                     rows.forEach((row) => select.append(new Option(row.name, row.id)));
                 }
             })
-            // A failed lookup must not leave the field looking loaded-but-empty,
-            // which reads as "this country has no states".
-            .catch(() => applyEnabledState(select, ''));
+            .catch((err) => {
+                if (err?.name === 'AbortError') {
+                    return;
+                }
+                applyEnabledState(select, '');
+            })
+            .finally(() => {
+                if (inflight.get(select) === controller) {
+                    inflight.delete(select);
+                }
+            });
     }
 
-    /** Clearing a select invalidates everything hanging off it. */
     function resetDescendants(select) {
-        if (!select.dataset.cascadeChild) return;
+        if (! select.dataset.cascadeChild) {
+            return;
+        }
 
         const child = document.querySelector(select.dataset.cascadeChild);
-        if (child) reload(child, '');
+        if (child) {
+            reload(child, '');
+        }
     }
 }
 

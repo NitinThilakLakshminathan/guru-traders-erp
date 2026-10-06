@@ -26,6 +26,14 @@
                 </select>
             </div>
             <div class="col-md-2">
+                <label class="form-label small text-body-secondary mb-1">Per page</label>
+                <select name="per_page" class="form-select form-select-sm">
+                    @foreach([25, 50, 100] as $size)
+                        <option value="{{ $size }}" @selected((int) ($filters['per_page'] ?? 25) === $size)>{{ $size }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-md-2">
                 <label class="form-label small text-body-secondary mb-1">Status</label>
                 <select name="status" class="form-select form-select-sm">
                     <option value="">All</option>
@@ -34,7 +42,7 @@
                 </select>
             </div>
             <div class="col-md-3 d-flex gap-2">
-                <button class="btn btn-sm btn-secondary"><i class="bi bi-funnel me-1"></i>Filter</button>
+                <button class="btn btn-sm btn-secondary text-nowrap d-inline-flex align-items-center flex-shrink-0"><i class="bi bi-funnel me-1"></i>Filter</button>
                 <a href="{{ route('masters.products.index') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
             </div>
         </form>
@@ -51,7 +59,7 @@
                         <th style="width:80px">Unit</th>
                         <th style="width:80px" class="text-end">GST</th>
                         <th style="width:110px">Status</th>
-                        <th class="text-end" style="width:150px">Actions</th>
+                        <th class="text-end sticky-actions-col" style="width:150px">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -60,12 +68,20 @@
                             <td class="text-body-secondary">{{ $loop->iteration + ($products->currentPage() - 1) * $products->perPage() }}</td>
                             <td><span class="badge text-bg-light border font-monospace">{{ $product->item_group_code }}</span></td>
                             <td>
-                                <span class="fw-semibold">{{ $product->name }}</span>
-                                @if($product->name_on_export_document && $product->name_on_export_document !== $product->name)
-                                    <div class="small text-body-secondary">
-                                        <i class="bi bi-file-earmark-text me-1"></i>{{ $product->name_on_export_document }}
+                                <div class="d-flex align-items-center gap-2">
+                                    @if($product->image_url)
+                                        <img src="{{ $product->image_url }}" alt="" class="rounded border flex-shrink-0"
+                                             style="width:32px;height:32px;object-fit:cover">
+                                    @endif
+                                    <div>
+                                        <span class="fw-semibold">{{ $product->displayName() }}</span> {{-- L-02: was $product->name, which for imported rows often repeats the Item Code column right next to it --}}
+                                        @if($product->name_on_export_document && $product->name_on_export_document !== $product->name)
+                                            <div class="small text-body-secondary">
+                                                <i class="bi bi-file-earmark-text me-1"></i>{{ $product->name_on_export_document }}
+                                            </div>
+                                        @endif
                                     </div>
-                                @endif
+                                </div>
                             </td>
                             <td class="text-body-secondary">{{ $product->category?->name ?: '—' }}</td>
                             <td class="text-body-secondary font-monospace">{{ $product->hsn_code ?: '—' }}</td>
@@ -73,7 +89,8 @@
                             <td class="text-end text-body-secondary">{{ $product->gstRate?->label ?: '—' }}</td>
                             <td>
                                 @can('product.edit')
-                                    <form action="{{ route('masters.products.toggle-status', $product) }}" method="POST">
+                                    <form action="{{ route('masters.products.toggle-status', $product) }}" method="POST" class="js-confirm"
+                                          data-confirm="{{ ($product->status === 'active' ? 'Deactivate' : 'Activate') . ' product "' . $product->name . '"?' }}">
                                         @csrf @method('PATCH')
                                         <button type="submit" class="btn btn-sm p-0 border-0 bg-transparent"
                                                 data-bs-toggle="tooltip" title="Click to toggle">
@@ -84,12 +101,18 @@
                                     <x-ui.status-badge :status="$product->status === 'active'" />
                                 @endcan
                             </td>
-                            <td class="text-end">
+                            <td class="text-end sticky-actions-col">
                                 <div class="btn-group btn-group-sm">
                                     @can('product.view')
                                         <a href="{{ route('masters.products.show', $product) }}"
                                            class="btn btn-outline-secondary" data-bs-toggle="tooltip" title="View">
                                             <i class="bi bi-eye"></i>
+                                        </a>
+                                    @endcan
+                                    @can('product.create')
+                                        <a href="{{ route('masters.products.duplicate', $product) }}"
+                                           class="btn btn-outline-secondary" data-bs-toggle="tooltip" title="Duplicate">
+                                            <i class="bi bi-copy"></i>
                                         </a>
                                     @endcan
                                     @can('product.edit')
@@ -101,7 +124,7 @@
                                     @can('product.delete')
                                         <x-ui.delete-form
                                             :action="route('masters.products.destroy', $product)"
-                                            :confirm="'Delete product &quot;'.$product->name.'&quot;?'" />
+                                            :confirm='"Delete product \"" . $product->name . "\"?"' />
                                     @endcan
                                 </div>
                             </td>

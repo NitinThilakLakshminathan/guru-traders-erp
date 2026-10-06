@@ -3,10 +3,18 @@
 
     <x-ui.card title="Packing Desk" variant="primary">
         <p class="text-body-secondary small mb-3">
-            Carton-wise packing for each shipment. Record cartons on the Export Document edit screen,
-            then generate Packing List formats from here.
+            Carton-wise packing for each shipment. Import a supplier-filled Excel/PDF packing list,
+            or edit cartons on the Export Document, then generate packing-list PDFs here.
         </p>
 
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            <a href="{{ route('export.packing.template-excel') }}" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-file-earmark-excel me-1"></i> Supplier Excel template
+            </a>
+            <a href="{{ route('export.packing.template-pdf') }}" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-file-earmark-pdf me-1"></i> Supplier PDF form
+            </a>
+        </div>
         <form method="GET" class="row g-2 align-items-end mb-3">
             <div class="col-md-6">
                 <label class="form-label small text-body-secondary mb-1">Search</label>
@@ -14,7 +22,7 @@
                        class="form-control form-control-sm" placeholder="Doc no., buyer">
             </div>
             <div class="col-md-3 d-flex gap-2">
-                <button class="btn btn-sm btn-secondary"><i class="bi bi-funnel me-1"></i>Filter</button>
+                <button class="btn btn-sm btn-secondary text-nowrap d-inline-flex align-items-center flex-shrink-0"><i class="bi bi-funnel me-1"></i>Filter</button>
                 <a href="{{ route('export.packing.index') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
             </div>
         </form>

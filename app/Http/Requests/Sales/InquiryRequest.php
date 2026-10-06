@@ -27,6 +27,29 @@ abstract class InquiryRequest extends FormRequest
         return $this->user()->can($this->permission());
     }
 
+    protected function prepareForValidation(): void
+    {
+        // Header category/format remain the inquiry summary — if the user only
+        // filled them on item lines, lift the first line up so list/show/OC
+        // still have a header value and existing required_unless:draft rules pass.
+        $items = array_values(array_filter((array) $this->input('items', [])));
+        $first = $items[0] ?? null;
+        if (! is_array($first)) {
+            return;
+        }
+
+        $merge = [];
+        if (blank($this->input('category_id')) && filled($first['category_id'] ?? null)) {
+            $merge['category_id'] = $first['category_id'];
+        }
+        if (blank($this->input('document_format_id')) && filled($first['document_format_id'] ?? null)) {
+            $merge['document_format_id'] = $first['document_format_id'];
+        }
+        if ($merge !== []) {
+            $this->merge($merge);
+        }
+    }
+
     public function rules(): array
     {
         $requiredUnlessDraft = 'required_unless:mode,draft';
@@ -51,13 +74,23 @@ abstract class InquiryRequest extends FormRequest
 
             'expected_shipment_date' => ['nullable', 'date'],
 
-            'delivery_details' => [$requiredUnlessDraft, 'nullable', 'string'],
-            'packing_details'  => [$requiredUnlessDraft, 'nullable', 'string'],
+            // M-06: was required even at the Inquiry stage, when a buyer's
+            // exact delivery/packing terms are often still unsettled and the
+            // Order Format has no defaults to pre-fill — the only inquiry in
+            // production has Packing Details = "fagatwfsrwfawe", someone
+            // mashing keys to get past a required field that had nothing
+            // real to put in it yet. Order Confirmation (see
+            // OrderConfirmationRequest) still requires both once the deal is
+            // actually confirmed, which is the point these need to be firm.
+            'delivery_details' => ['nullable', 'string'],
+            'packing_details'  => ['nullable', 'string'],
             'remarks'          => ['nullable', 'string', 'max:2000'],
 
             'status' => ['required', Rule::in(array_keys(Inquiry::STATUSES))],
 
             'items'                        => ['nullable', 'array', 'max:200'],
+            'items.*.category_id'          => [$requiredUnlessDraft, 'nullable', 'integer', Rule::exists('categories', 'id')],
+            'items.*.document_format_id'   => [$requiredUnlessDraft, 'nullable', 'integer', Rule::exists('document_formats', 'id')],
             'items.*.design_no'            => ['nullable', 'string', 'max:150'],
             'items.*.description'          => ['nullable', 'string', 'max:2000'],
             'items.*.product_id'           => ['nullable', 'integer', Rule::exists('products', 'id')],
@@ -66,6 +99,8 @@ abstract class InquiryRequest extends FormRequest
             'items.*.fob_value_id'         => ['nullable', 'integer', Rule::exists('fob_values', 'id')],
             'items.*.price'                => ['nullable', 'numeric', 'min:0', 'max:9999999999.99'],
             'items.*.cost_price'           => ['nullable', 'numeric', 'min:0', 'max:9999999999.99'],
+            'items.*.bom_cost'             => ['nullable', 'numeric', 'min:0', 'max:9999999999.99'],
+            'items.*.fob_unit'             => ['nullable', 'numeric', 'min:0', 'max:9999999999.9999'],
             'items.*.status'               => ['nullable', Rule::in(array_keys(Inquiry::STATUSES))],
             'items.*.remarks'              => ['nullable', 'string', 'max:1000'],
 
@@ -83,10 +118,13 @@ abstract class InquiryRequest extends FormRequest
             // Task 12 — BOM snapshot (qty per finished piece), FOB-style costing.
             'items.*.bom'                     => ['nullable', 'array', 'max:100'],
             'items.*.bom.*.component_name'    => ['nullable', 'string', 'max:200'],
+            'items.*.bom.*.size'              => ['nullable', 'string', 'max:60'],
             'items.*.bom.*.qty'               => ['nullable', 'numeric', 'min:0', 'max:99999999.9999'],
+            'items.*.bom.*.rate'              => ['nullable', 'numeric', 'min:0', 'max:99999999.9999'],
             'items.*.bom.*.unit'              => ['nullable', 'string', 'max:20'],
             'items.*.bom.*.is_custom'         => ['nullable', 'boolean'],
             'items.*.bom.*.remarks'           => ['nullable', 'string', 'max:500'],
+            'items.*.bom.*.image_path'        => ['nullable', 'string', 'max:255'],
 
             'followups'                => ['nullable', 'array', 'max:100'],
             'followups.*.id'           => ['nullable', 'integer'],
@@ -108,7 +146,35 @@ abstract class InquiryRequest extends FormRequest
             }
 
             $this->validateItemUnits($validator);
+            $this->guardConvertedToOcStatus($validator);
         });
+    }
+
+    /**
+     * H-06: 'Converted to OC' is meant to be system-set only, the moment
+     * OrderConfirmationService confirms every line has a real Order
+     * Confirmation behind it (see app/Services/Sales/OrderConfirmationService.php)
+     * — not a stage a user can jump to from the Status dropdown on a Draft
+     * inquiry with no OC at all. The form already hides the option unless
+     * the inquiry is already converted (see _form.blade.php), but the
+     * dropdown is just HTML; this is the rule that actually holds under a
+     * replayed/edited request.
+     */
+    private function guardConvertedToOcStatus(Validator $validator): void
+    {
+        if ($this->input('status') !== 'converted_to_oc') {
+            return;
+        }
+
+        $inquiry = $this->route('inquiry');
+        $alreadyConverted = $inquiry instanceof Inquiry && $inquiry->status === 'converted_to_oc';
+
+        if (! $alreadyConverted) {
+            $validator->errors()->add(
+                'status',
+                'Converted to OC is set automatically once an Order Confirmation exists for every item — it cannot be chosen by hand.'
+            );
+        }
     }
 
     /**
@@ -123,24 +189,22 @@ abstract class InquiryRequest extends FormRequest
      */
     private function validateItemUnits(Validator $validator): void
     {
-        $formatId = $this->input('document_format_id');
-        if (blank($formatId)) {
+        $items = (array) $this->input('items', []);
+        if ($items === []) {
             return;
         }
 
-        $formatUnits = DocumentFormat::query()
-            ->whereKey($formatId)
-            ->first()
-            ?->units()
-            ->pluck('name')
-            ->all() ?? [];
+        $formatIds = collect($items)->pluck('document_format_id')->filter()->unique()->values();
+        $headerFormatId = $this->input('document_format_id');
+        if (filled($headerFormatId)) {
+            $formatIds = $formatIds->push($headerFormatId)->unique()->values();
+        }
 
-        $productIds = collect($this->input('items', []))
-            ->pluck('product_id')
-            ->filter()
-            ->unique()
-            ->values();
+        $formats = $formatIds->isEmpty()
+            ? collect()
+            : DocumentFormat::query()->whereIn('id', $formatIds)->with('units')->get()->keyBy('id');
 
+        $productIds = collect($items)->pluck('product_id')->filter()->unique()->values();
         $products = $productIds->isEmpty()
             ? collect()
             : Product::query()->whereIn('id', $productIds)->get(['id', 'unit_po', 'unit_export'])->keyBy('id');
@@ -156,11 +220,16 @@ abstract class InquiryRequest extends FormRequest
                 ->all();
         }
 
-        foreach ((array) $this->input('items', []) as $index => $item) {
+        foreach ($items as $index => $item) {
             $unit = $item['unit'] ?? null;
             if (blank($unit)) {
                 continue;
             }
+
+            $formatId = $item['document_format_id'] ?? $headerFormatId;
+            $formatUnits = filled($formatId)
+                ? ($formats->get($formatId)?->units->pluck('name')->all() ?? [])
+                : [];
 
             $allowed = $formatUnits;
             $product = isset($item['product_id']) ? $products->get($item['product_id']) : null;
@@ -191,13 +260,15 @@ abstract class InquiryRequest extends FormRequest
     public function attributes(): array
     {
         return [
-            'source_id'           => 'source',
-            'buyer_id'            => 'buyer',
-            'category_id'         => 'category',
-            'document_format_id'  => 'order format',
-            'currency_id'         => 'currency',
-            'delivery_details'    => 'delivery details',
-            'packing_details'     => 'packing details',
+            'source_id'                      => 'source',
+            'buyer_id'                       => 'buyer',
+            'category_id'                    => 'default category',
+            'document_format_id'             => 'default order format',
+            'items.*.category_id'            => 'item category',
+            'items.*.document_format_id'     => 'item order format',
+            'currency_id'                    => 'currency',
+            'delivery_details'               => 'delivery details',
+            'packing_details'                => 'packing details',
         ];
     }
 }

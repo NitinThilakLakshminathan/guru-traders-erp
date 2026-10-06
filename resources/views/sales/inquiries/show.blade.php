@@ -25,6 +25,7 @@
             <a href="{{ route('sales.inquiries.index') }}" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-arrow-left me-1"></i> Back
             </a>
+            <x-order-context-modal :order-context="$orderContext ?? ['available' => false]" modal-id="inquiryOrderContextModal" />
         </x-slot>
 
         <dl class="row mb-4">
@@ -45,11 +46,16 @@
             <dt class="col-sm-3 text-body-secondary fw-normal">Buyer</dt>
             <dd class="col-sm-9">{{ $inquiry->buyer?->company_name }} ({{ $inquiry->buyer?->display_code }})</dd>
 
-            <dt class="col-sm-3 text-body-secondary fw-normal">Category</dt>
+            <dt class="col-sm-3 text-body-secondary fw-normal">Default Category</dt>
             <dd class="col-sm-9">{{ $inquiry->category?->name ?? '—' }}</dd>
 
-            <dt class="col-sm-3 text-body-secondary fw-normal">Order Format</dt>
-            <dd class="col-sm-9">{{ $inquiry->format?->name ?? '—' }} <span class="text-body-secondary">({{ $inquiry->format?->module }})</span></dd>
+            <dt class="col-sm-3 text-body-secondary fw-normal">Default Order Format</dt>
+            {{-- M-11: "(po)" was DocumentFormat's internal `module` seed value
+                 (DocumentFormatSeeder) leaking straight into the UI — it has
+                 no user-facing label anywhere in the app and nothing else
+                 shows it, so it's dropped here rather than invented a label
+                 for an implementation detail nobody needs to see. --}}
+            <dd class="col-sm-9">{{ $inquiry->format?->name ?? '—' }}</dd>
 
             <dt class="col-sm-3 text-body-secondary fw-normal">Agent</dt>
             <dd class="col-sm-9">
@@ -77,14 +83,20 @@
                 <thead class="table-light">
                     <tr>
                         <th>#</th>
+                        <th>Category</th>
+                        <th>Order Format</th>
                         <th>Design No.</th>
                         <th>Product</th>
                         <th>Supplier</th>
-                        <th>Colour / Size Breakdown</th>
+                        <th>Colour / Size</th>
                         <th>Unit</th>
-                        <th>FOB</th>
                         <th class="text-end">Price</th>
-                        <th class="text-end text-body-secondary">Cost Price <span class="fw-normal small">(internal)</span></th>
+                        <th class="text-end">Cost</th>
+                        <th class="text-end">BOM cost</th>
+                        <th class="text-end">Final cost</th>
+                        <th class="text-end">FOB / unit</th>
+                        <th class="text-end">Total FOB</th>
+                        <th class="text-end">Total cost</th>
                         <th class="text-end">Qty</th>
                         <th class="text-end">Amount</th>
                         <th>Status</th>
@@ -92,8 +104,17 @@
                 </thead>
                 <tbody>
                     @forelse($inquiry->items as $item)
+                        @php
+                            $bomCost = (float) ($item->bom_cost ?? 0);
+                            $costPrice = (float) ($item->cost_price ?? 0);
+                            $finalCost = $costPrice + $bomCost;
+                            $fobUnit = (float) ($item->fob_unit ?? 0);
+                            $qty = (int) $item->qty;
+                        @endphp
                         <tr>
                             <td>{{ $loop->iteration }}</td>
+                            <td class="small">{{ $item->category?->name ?? '—' }}</td>
+                            <td class="small">{{ $item->format?->name ?? '—' }}</td>
                             <td class="fw-semibold">
                                 {{ $item->design_no ?: '—' }}
                                 @if($item->custom_values)
@@ -115,7 +136,7 @@
                                         @forelse($colour->sizes as $size)
                                             <span class="text-body-secondary">{{ $size->size }}:{{ $size->qty }}</span>@if(! $loop->last), @endif
                                         @empty
-                                            <span class="text-body-secondary">—</span>
+                                            <span class="text-body-secondary">Qty {{ $item->qty }}</span>
                                         @endforelse
                                     </div>
                                 @empty
@@ -123,22 +144,27 @@
                                 @endforelse
                             </td>
                             <td>{{ $item->unit ?? '—' }}</td>
-                            <td>{{ $item->fobValue?->name ?? '—' }}</td>
                             <td class="text-end">{{ $item->price !== null ? number_format((float) $item->price, 2) : '—' }}</td>
-                            <td class="text-end text-body-secondary">{{ $item->cost_price !== null ? number_format((float) $item->cost_price, 2) : '—' }}</td>
-                            <td class="text-end">{{ $item->qty }}</td>
+                            <td class="text-end text-body-secondary">{{ $item->cost_price !== null ? number_format($costPrice, 2) : '—' }}</td>
+                            <td class="text-end text-body-secondary">{{ $bomCost ? number_format($bomCost, 2) : '—' }}</td>
+                            <td class="text-end">{{ $finalCost ? number_format($finalCost, 2) : '—' }}</td>
+                            <td class="text-end">{{ $fobUnit ? number_format($fobUnit, 2) : '—' }}</td>
+                            <td class="text-end">{{ ($fobUnit && $qty) ? number_format($fobUnit * $qty, 2) : '—' }}</td>
+                            <td class="text-end">{{ ($finalCost && $qty) ? number_format($finalCost * $qty, 2) : '—' }}</td>
+                            <td class="text-end">{{ $qty }}</td>
                             <td class="text-end">{{ number_format((float) $item->amount, 2) }}</td>
                             <td><span class="badge text-bg-{{ $item->statusColor() }}">{{ $item->statusLabel() }}</span></td>
                         </tr>
                     @empty
-                        <x-ui.empty-state :colspan="12" icon="bi-box-seam" title="No items added" />
+                        <x-ui.empty-state :colspan="18" icon="bi-box-seam" title="No items added" />
                     @endforelse
                 </tbody>
                 @if($inquiry->items->isNotEmpty())
                     <tfoot>
                         <tr class="fw-semibold table-light">
-                            <td colspan="10" class="text-end">Total</td>
-                            <td class="text-end">{{ number_format($inquiry->totalAmount(), 2) }}</td>
+                            {{-- H-08: currency code + grouped amount on the summary total, not a bare number --}}
+                            <td colspan="16" class="text-end">Total ({{ $inquiry->currency?->iso_code ?? 'INR' }})</td>
+                            <td class="text-end">{{ \App\Support\Money::format($inquiry->totalAmount(), $inquiry->currency?->iso_code) }}</td>
                             <td></td>
                         </tr>
                     </tfoot>
